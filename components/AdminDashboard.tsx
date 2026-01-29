@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Seller, SellerStatus, CustomStatus } from '../types';
 import { dbService } from '../services/dbService';
@@ -20,30 +19,29 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
   const [selectedReportSeller, setSelectedReportSeller] = useState<string>('all');
   const [reportData, setReportData] = useState<any[]>([]);
   const [serviceHistory, setServiceHistory] = useState<any[]>([]);
+  const [currentTime, setCurrentTime] = useState(new Date());
   
   const [isSellerModalOpen, setIsSellerModalOpen] = useState(false);
-  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
-  
   const [editingSeller, setEditingSeller] = useState<Seller | null>(null);
   const [formData, setFormData] = useState({ name: '', avatar: '', status: 'AVAILABLE' });
-  const [statusFormData, setStatusFormData] = useState<{ label: string; icon: string; color: string; behavior: 'INACTIVE' | 'ACTIVE' }>({ 
-    label: '', 
-    icon: 'beach_access', 
-    color: '#135bec', 
-    behavior: 'INACTIVE' 
-  });
   
   const [dbStatus, setDbStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [aiInsight, setAiInsight] = useState<string>('Gerando relatório inteligente...');
 
+  // Atualiza o relógio interno para os timers de "tempo em mesa"
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const loadData = async () => {
     try {
-      const [stats, history, statuses] = await Promise.all([
+      const [statsRes, history, statuses] = await Promise.all([
         dbService.getAdvancedStats(selectedReportSeller === 'all' ? undefined : selectedReportSeller),
         dbService.getServiceHistory(selectedReportSeller === 'all' ? undefined : selectedReportSeller),
         dbService.getCustomStatuses()
       ]);
-      setReportData(stats);
+      setReportData(statsRes);
       setServiceHistory(history);
       setCustomStatuses(statuses);
     } catch (e) {
@@ -68,33 +66,52 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
   }, [reportData]);
 
   const stats = useMemo(() => {
-    const total = reportData.length;
-    const sales = reportData.filter(r => r.venda_realizada).length;
-    const revenue = reportData.reduce((acc, curr) => acc + Number(curr.valor_venda || 0), 0);
+    const finishedServices = reportData.filter(r => r.venda_realizada !== null);
+    const total = finishedServices.length;
+    const sales = finishedServices.filter(r => r.venda_realizada).length;
+    const revenue = finishedServices.reduce((acc, curr) => acc + Number(curr.valor_venda || 0), 0);
     const avgTicket = sales > 0 ? (revenue / sales).toFixed(2) : "0.00";
     const conversion = total > 0 ? (sales / total * 100).toFixed(1) : 0;
     
     return { total, sales, revenue, avgTicket, conversion };
   }, [reportData]);
 
-  const serviceTypeDistribution = useMemo(() => {
-    const counts: Record<string, number> = {};
-    reportData.forEach(row => counts[row.tipo_atendimento] = (counts[row.tipo_atendimento] || 0) + 1);
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
-  }, [reportData]);
+  const activeServices = useMemo(() => {
+    return serviceHistory.filter(h => h.status === 'PENDING');
+  }, [serviceHistory]);
 
-  const conversionData = useMemo(() => {
-    let sales = 0, noSales = 0;
-    reportData.forEach(row => row.venda_realizada ? sales++ : noSales++);
-    return [{ name: 'Vendas', value: sales }, { name: 'Sem Venda', value: noSales }];
+  // FIX: Added missing conversionData for the charts
+  const conversionData = useMemo(() => [
+    { name: 'Vendas', value: stats.sales },
+    { name: 'Perdas', value: stats.total - stats.sales }
+  ], [stats.sales, stats.total]);
+
+  // FIX: Added missing serviceTypeDistribution for the charts
+  const serviceTypeDistribution = useMemo(() => {
+    const dist: Record<string, number> = {};
+    reportData.forEach(item => {
+      const type = item.tipo_atendimento || 'OUTROS';
+      dist[type] = (dist[type] || 0) + 1;
+    });
+    return Object.entries(dist).map(([name, value]) => ({ name, value }));
   }, [reportData]);
 
   const formatDuration = (start: string, end?: string) => {
-    if (!end) return "Em aberto";
-    const diff = new Date(end).getTime() - new Date(start).getTime();
+    const startTime = new Date(start).getTime();
+    const endTime = end ? new Date(end).getTime() : currentTime.getTime();
+    const diff = endTime - startTime;
     const minutes = Math.floor(diff / 60000);
-    const seconds = ((diff % 60000) / 1000).toFixed(0);
-    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+  };
+
+  const translateStatus = (status: string) => {
+    if (status === 'AVAILABLE') return 'Disponível';
+    if (status === 'IN_SERVICE') return 'Em Atendimento';
+    if (status === 'BREAK') return 'Intervalo';
+    if (status === 'LUNCH') return 'Almoço';
+    const custom = customStatuses.find(cs => cs.id === status);
+    return custom ? custom.label : 'Inativo';
   };
 
   const handleSellerSubmit = async (e: React.FormEvent) => {
@@ -113,15 +130,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
       setDbStatus('SUCCESS');
       setTimeout(() => { setIsSellerModalOpen(false); onRefresh(); setDbStatus('IDLE'); }, 500);
     } catch (err) { setDbStatus('ERROR'); }
-  };
-
-  const translateStatus = (status: string) => {
-    if (status === 'AVAILABLE') return 'Disponível';
-    if (status === 'IN_SERVICE') return 'Em Atendimento';
-    if (status === 'BREAK') return 'Intervalo';
-    if (status === 'LUNCH') return 'Almoço';
-    const custom = customStatuses.find(cs => cs.id === status);
-    return custom ? custom.label : 'Inativo';
   };
 
   return (
@@ -145,13 +153,54 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
       <main className="flex-1 p-6 max-w-4xl mx-auto w-full space-y-8">
         {activeTab === 'home' && (
           <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Cards de Métricas Rápidas */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard title="Atendimentos" value={stats.total.toString()} icon="assignment" color="text-blue-500" />
+              <StatCard title="Concluídos" value={stats.total.toString()} icon="assignment_turned_in" color="text-blue-500" />
               <StatCard title="Faturamento" value={`R$ ${stats.revenue.toFixed(0)}`} icon="payments" color="text-green-500" />
               <StatCard title="Ticket Médio" value={`R$ ${stats.avgTicket}`} icon="receipt_long" color="text-purple-500" />
               <StatCard title="Conversão" value={`${stats.conversion}%`} icon="trending_up" color="text-orange-500" />
             </div>
 
+            {/* Atendimentos Pendentes (Em Andamento) */}
+            <div className="space-y-4">
+               <div className="flex justify-between items-center px-2">
+                  <h3 className="font-black text-xl">Atendimentos em Andamento</h3>
+                  <span className="flex items-center gap-1.5 bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-[10px] font-black uppercase">
+                    <span className="size-1.5 bg-blue-500 rounded-full animate-ping"></span>
+                    {activeServices.length} Ativos
+                  </span>
+               </div>
+               <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                  {activeServices.length === 0 ? (
+                    <div className="w-full bg-white dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 p-8 rounded-[2rem] text-center opacity-40">
+                       <p className="text-xs font-black uppercase tracking-widest">Nenhum cliente em mesa no momento</p>
+                    </div>
+                  ) : (
+                    activeServices.map(service => (
+                      <div key={service.id} className="min-w-[280px] bg-white dark:bg-gray-900 p-5 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-4">
+                        <div className="flex items-center gap-3">
+                           <div className="size-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
+                              <span className="material-symbols-outlined text-xl">person</span>
+                           </div>
+                           <div className="flex-1">
+                              <p className="text-[9px] font-black uppercase text-gray-400">Cliente</p>
+                              <p className="font-black text-base leading-tight truncate">{service.cliente_nome}</p>
+                           </div>
+                           <div className="text-right">
+                              <p className="text-[10px] font-black text-blue-500">{formatDuration(service.criado_em)}</p>
+                           </div>
+                        </div>
+                        <div className="flex items-center gap-2 pt-2 border-t border-gray-50 dark:border-gray-800">
+                           <img src={service.vendedor_avatar} className="size-6 rounded-full object-cover" />
+                           <p className="text-[10px] font-bold text-gray-500">Atendido por: <span className="text-gray-900 dark:text-white">{service.vendedor_nome.split(' ')[0]}</span></p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+               </div>
+            </div>
+
+            {/* Insight de IA */}
             <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[2.5rem] p-8 shadow-sm">
                <div className="flex items-center gap-3 mb-2">
                   <span className="material-symbols-outlined text-primary">auto_awesome</span>
@@ -160,24 +209,42 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                <p className="text-gray-500 italic text-sm leading-relaxed">{aiInsight}</p>
             </div>
 
+            {/* Monitoramento de Equipe */}
             <div className="space-y-4">
                <h3 className="font-black text-xl px-2">Monitoramento de Equipe</h3>
                <div className="grid gap-3">
-                  {sellers.map(s => (
-                    <div key={s.id} className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex items-center gap-4 hover:shadow-md transition-shadow">
-                      <img src={s.avatar} className="size-12 rounded-2xl object-cover" alt="" />
-                      <div className="flex-1">
-                        <p className="font-black text-base">{s.name}</p>
-                        <p className="text-[10px] font-black uppercase text-gray-400">{translateStatus(s.status)}</p>
+                  {sellers.map(s => {
+                    const isActive = s.status === 'IN_SERVICE';
+                    const activeClient = serviceHistory.find(h => h.vendedor_id === s.id && h.status === 'PENDING');
+                    
+                    return (
+                      <div key={s.id} className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex items-center gap-4 hover:shadow-md transition-shadow">
+                        <div className="relative">
+                          <img src={s.avatar} className="size-14 rounded-2xl object-cover" alt="" />
+                          <span className={`absolute -bottom-1 -right-1 size-4 border-2 border-white dark:border-gray-900 rounded-full ${s.status === 'AVAILABLE' ? 'bg-green-500' : isActive ? 'bg-blue-500' : 'bg-orange-400'}`}></span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-black text-base">{s.name}</p>
+                          <div className="flex items-center gap-2">
+                             <p className={`text-[10px] font-black uppercase ${isActive ? 'text-blue-500' : 'text-gray-400'}`}>
+                                {translateStatus(s.status)}
+                             </p>
+                             {isActive && activeClient && (
+                               <p className="text-[10px] font-bold text-gray-300">
+                                 • Com: {activeClient.cliente_nome}
+                               </p>
+                             )}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => { setEditingSeller(s); setFormData({name: s.name, avatar: s.avatar, status: s.status}); setIsSellerModalOpen(true); }}
+                          className="size-10 flex items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-800 text-gray-400 hover:text-primary transition-colors active:scale-95"
+                        >
+                          <span className="material-symbols-outlined text-xl">settings</span>
+                        </button>
                       </div>
-                      <button 
-                        onClick={() => { setEditingSeller(s); setFormData({name: s.name, avatar: s.avatar, status: s.status}); setIsSellerModalOpen(true); }}
-                        className="text-primary font-black text-[10px] uppercase bg-primary/5 px-4 py-2 rounded-xl active:scale-95"
-                      >
-                        Gerir
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                </div>
             </div>
           </div>
@@ -185,6 +252,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
 
         {activeTab === 'reports' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
+             {/* Filtros e Mini Stats permanecem conforme versão anterior */}
              <div className="bg-white dark:bg-gray-900 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col md:flex-row gap-6 items-center">
                 <div className="flex-1 w-full">
                   <h3 className="font-black text-xs uppercase text-gray-400 mb-2 px-2">Filtro de Vendedor</h3>
@@ -232,7 +300,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                 </ChartCard>
              </div>
 
-             {/* Histórico Detalhado */}
+             {/* Log de Auditoria com Status Pendente */}
              <div className="space-y-4">
                 <div className="flex justify-between items-center px-2">
                   <h3 className="font-black text-2xl">Log de Auditoria</h3>
@@ -252,41 +320,51 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                          {serviceHistory.map(item => (
-                            <tr key={item.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors group">
-                              <td className="px-6 py-5 whitespace-nowrap">
-                                <p className="text-sm font-black text-gray-600 dark:text-gray-300">
-                                  {new Date(item.criado_em).toLocaleDateString('pt-BR')}
-                                </p>
-                                <p className="text-[10px] font-bold text-gray-400">
-                                  {new Date(item.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                                </p>
-                              </td>
-                              <td className="px-6 py-5">
-                                <p className="font-black text-sm">{item.cliente_nome}</p>
-                                <p className="text-[10px] text-primary font-bold uppercase">{item.tipo_atendimento}</p>
-                              </td>
-                              <td className="px-6 py-5">
-                                <div className="flex items-center gap-3">
-                                  <img src={item.vendedor_avatar} className="size-8 rounded-lg object-cover" />
-                                  <p className="text-xs font-bold text-gray-500">{item.vendedor_nome.split(' ')[0]}</p>
-                                </div>
-                              </td>
-                              <td className="px-6 py-5 text-xs font-bold text-gray-400">
-                                {formatDuration(item.criado_em, item.finalizado_em)}
-                              </td>
-                              <td className="px-6 py-5">
-                                <span className={`text-[9px] font-black uppercase px-3 py-1.5 rounded-full ${item.venda_realizada ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                                  {item.venda_realizada ? 'Venda' : item.motivo_perda || 'Sem Venda'}
-                                </span>
-                              </td>
-                              <td className="px-6 py-5 whitespace-nowrap">
-                                <p className={`text-sm font-black ${item.venda_realizada ? 'text-green-500' : 'text-gray-300'}`}>
-                                  R$ {Number(item.valor_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                </p>
-                              </td>
-                            </tr>
-                          ))}
+                          {serviceHistory.map(item => {
+                            const isPending = item.status === 'PENDING';
+                            return (
+                              <tr key={item.id} className={`hover:bg-gray-50/50 dark:hover:bg-gray-800/20 transition-colors group ${isPending ? 'bg-blue-500/[0.02]' : ''}`}>
+                                <td className="px-6 py-5 whitespace-nowrap">
+                                  <p className="text-sm font-black text-gray-600 dark:text-gray-300">
+                                    {new Date(item.criado_em).toLocaleDateString('pt-BR')}
+                                  </p>
+                                  <p className="text-[10px] font-bold text-gray-400">
+                                    {new Date(item.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                                  </p>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <p className="font-black text-sm">{item.cliente_nome}</p>
+                                  <p className="text-[10px] text-primary font-bold uppercase">{item.tipo_atendimento}</p>
+                                </td>
+                                <td className="px-6 py-5">
+                                  <div className="flex items-center gap-3">
+                                    <img src={item.vendedor_avatar} className="size-8 rounded-lg object-cover" />
+                                    <p className="text-xs font-bold text-gray-500">{item.vendedor_nome.split(' ')[0]}</p>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-5 text-xs font-bold text-gray-400">
+                                  {isPending ? (
+                                    <span className="text-blue-500 animate-pulse">{formatDuration(item.criado_em)}</span>
+                                  ) : (
+                                    formatDuration(item.criado_em, item.finalizado_em)
+                                  )}
+                                </td>
+                                <td className="px-6 py-5">
+                                  <span className={`text-[9px] font-black uppercase px-3 py-1.5 rounded-full ${
+                                    isPending ? 'bg-blue-100 text-blue-600' : 
+                                    item.venda_realizada ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                                  }`}>
+                                    {isPending ? 'Em Andamento' : item.venda_realizada ? 'Venda' : item.motivo_perda || 'Sem Venda'}
+                                  </span>
+                                </td>
+                                <td className="px-6 py-5 whitespace-nowrap">
+                                  <p className={`text-sm font-black ${isPending ? 'text-gray-400 italic' : item.venda_realizada ? 'text-green-500' : 'text-gray-300'}`}>
+                                    {isPending ? '---' : `R$ ${Number(item.valor_venda || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                                  </p>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                       {serviceHistory.length === 0 && (
@@ -301,7 +379,48 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
           </div>
         )}
 
-        {/* Outras abas permanecem iguais (Status e Settings) */}
+        {activeTab === 'status' && (
+          <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-center px-2">
+              <h3 className="font-black text-2xl">Gestão de Status RH</h3>
+              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{customStatuses.length} Customizados</p>
+            </div>
+            <div className="grid gap-3">
+              {customStatuses.length === 0 ? (
+                <div className="py-20 text-center opacity-20">
+                  <span className="material-symbols-outlined text-6xl">category</span>
+                  <p className="text-xs font-black uppercase mt-2">Nenhum status RH cadastrado</p>
+                </div>
+              ) : (
+                customStatuses.map(status => (
+                  <div key={status.id} className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-4">
+                      <div className={`size-12 rounded-2xl flex items-center justify-center text-white`} style={{ backgroundColor: status.color }}>
+                        <span className="material-symbols-outlined">{status.icon}</span>
+                      </div>
+                      <div>
+                        <p className="font-black text-base">{status.label}</p>
+                        <p className={`text-[10px] font-black uppercase ${status.behavior === 'ACTIVE' ? 'text-green-500' : 'text-gray-400'}`}>
+                          {status.behavior === 'ACTIVE' ? 'Fila Ativa' : 'Fila Pausada'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
+            <div className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+               <h3 className="text-xl font-black mb-6">Configurações Gerais</h3>
+               <p className="text-gray-400 text-sm">Painel de ajustes administrativos e preferências do sistema.</p>
+               {/* Espaço para futuras configurações */}
+            </div>
+          </div>
+        )}
       </main>
 
       <nav className="fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl border border-gray-100 dark:border-gray-800 shadow-2xl rounded-[3rem] flex justify-around p-3 z-[150]">
@@ -310,6 +429,39 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
         <TabItem icon="category" label="RH" active={activeTab === 'status'} onClick={() => setActiveTab('status')} />
         <TabItem icon="settings" label="Ajustes" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
       </nav>
+
+      {/* Modal de Gestão de Vendedor Simplificado */}
+      {isSellerModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-[3rem] p-8 animate-in slide-in-from-bottom duration-300">
+            <h3 className="text-2xl font-black mb-6">{editingSeller ? 'Editar Vendedor' : 'Novo Vendedor'}</h3>
+            <form onSubmit={handleSellerSubmit} className="space-y-6">
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Nome Completo</label>
+                 <input 
+                   required
+                   className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 px-6 font-bold"
+                   value={formData.name}
+                   onChange={e => setFormData({...formData, name: e.target.value})}
+                 />
+               </div>
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black uppercase text-gray-400 ml-2">URL do Avatar</label>
+                 <input 
+                   className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 px-6 font-bold"
+                   value={formData.avatar}
+                   onChange={e => setFormData({...formData, avatar: e.target.value})}
+                   placeholder="https://exemplo.com/foto.jpg"
+                 />
+               </div>
+               <div className="flex gap-4 pt-4">
+                 <button type="button" onClick={() => setIsSellerModalOpen(false)} className="flex-1 h-14 rounded-2xl font-black text-gray-400">Cancelar</button>
+                 <button type="submit" className="flex-2 px-8 h-14 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20">Salvar Alterações</button>
+               </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
