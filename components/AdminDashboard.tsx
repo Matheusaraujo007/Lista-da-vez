@@ -24,13 +24,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
   const [currentTime, setCurrentTime] = useState(new Date());
   
   const [isSellerModalOpen, setIsSellerModalOpen] = useState(false);
+  const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
   const [editingSeller, setEditingSeller] = useState<Seller | null>(null);
+  
   const [formData, setFormData] = useState({ name: '', avatar: '', status: 'AVAILABLE' });
+  const [statusFormData, setStatusFormData] = useState({ label: '', icon: 'info', color: '#6c757d', behavior: 'INACTIVE' as 'ACTIVE' | 'INACTIVE' });
   
   const [dbStatus, setDbStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [aiInsight, setAiInsight] = useState<string>('Gerando relatório inteligente...');
+  const isFetchingInsight = useRef(false);
 
-  // Atualiza o relógio interno para os timers de "tempo em mesa"
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
@@ -57,15 +60,26 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
 
   useEffect(() => {
     const fetchInsights = async () => {
+      if (isFetchingInsight.current) return;
+      isFetchingInsight.current = true;
+      
       const conversion = reportData.length > 0 ? (reportData.filter(r => r.venda_realizada).length / reportData.length * 100).toFixed(1) : 0;
-      const text = await getDashboardInsights({ 
-        totalServicesToday: reportData.length, 
-        conversionRate: conversion 
-      });
-      setAiInsight(text || '');
+      
+      try {
+        const text = await getDashboardInsights({ 
+          totalServicesToday: reportData.length, 
+          conversionRate: conversion 
+        });
+        setAiInsight(text || 'Continue monitorando os resultados!');
+      } finally {
+        isFetchingInsight.current = false;
+      }
     };
-    if (reportData.length > 0) fetchInsights();
-  }, [reportData]);
+
+    if (reportData.length > 0 && activeTab === 'home') {
+      fetchInsights();
+    }
+  }, [reportData, activeTab]);
 
   const stats = useMemo(() => {
     const finishedServices = reportData.filter(r => r.venda_realizada !== null);
@@ -132,8 +146,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
     } catch (err) { setDbStatus('ERROR'); }
   };
 
+  const handleStatusSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDbStatus('LOADING');
+    try {
+      await dbService.createCustomStatus(statusFormData);
+      setDbStatus('SUCCESS');
+      setTimeout(() => { 
+        setIsStatusModalOpen(false); 
+        loadData(); 
+        setDbStatus('IDLE'); 
+        setStatusFormData({ label: '', icon: 'info', color: '#6c757d', behavior: 'INACTIVE' });
+      }, 500);
+    } catch (err) { setDbStatus('ERROR'); }
+  };
+
+  const handleDeleteStatus = async (id: string) => {
+    if (!confirm('Deseja realmente excluir este status?')) return;
+    try {
+      await dbService.deleteCustomStatus(id);
+      loadData();
+    } catch (e) { alert('Erro ao excluir status.'); }
+  };
+
   return (
-    <div className="flex flex-col min-h-screen pb-32 bg-gray-50 dark:bg-background-dark">
+    <div className="flex flex-col min-h-screen pb-32 bg-gray-50 dark:bg-background-dark text-[#111318] dark:text-white">
       <header className="sticky top-0 z-40 bg-white/80 dark:bg-background-dark/80 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800 px-6 py-5 flex items-center justify-between">
         <button onClick={onNavigateToSeller} className="size-12 flex items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800 text-gray-400 active:scale-90 transition-all">
           <span className="material-symbols-outlined">logout</span>
@@ -143,17 +180,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
           <p className="text-[10px] font-bold text-primary uppercase tracking-widest">Dashboards & Auditoria</p>
         </div>
         <button 
-          onClick={() => { setEditingSeller(null); setFormData({name: '', avatar: '', status: 'AVAILABLE'}); setIsSellerModalOpen(true); }}
+          onClick={() => {
+            if (activeTab === 'status') {
+              setIsStatusModalOpen(true);
+            } else {
+              setEditingSeller(null); 
+              setFormData({name: '', avatar: '', status: 'AVAILABLE'}); 
+              setIsSellerModalOpen(true); 
+            }
+          }}
           className="size-12 flex items-center justify-center rounded-2xl bg-primary text-white shadow-lg active:scale-90 transition-all"
         >
-          <span className="material-symbols-outlined">person_add</span>
+          <span className="material-symbols-outlined">{activeTab === 'status' ? 'add_circle' : 'person_add'}</span>
         </button>
       </header>
 
       <main className="flex-1 p-6 max-w-4xl mx-auto w-full space-y-8">
         {activeTab === 'home' && (
           <div className="space-y-8 animate-in fade-in duration-500">
-            {/* Cards de Métricas Rápidas */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard title="Concluídos" value={stats.total.toString()} icon="assignment_turned_in" color="text-blue-500" />
               <StatCard title="Faturamento" value={`R$ ${stats.revenue.toFixed(0)}`} icon="payments" color="text-green-500" />
@@ -161,7 +205,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
               <StatCard title="Conversão" value={`${stats.conversion}%`} icon="trending_up" color="text-orange-500" />
             </div>
 
-            {/* Atendimentos Pendentes (Em Andamento) */}
             <div className="space-y-4">
                <div className="flex justify-between items-center px-2">
                   <h3 className="font-black text-xl">Atendimentos em Andamento</h3>
@@ -208,7 +251,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                </div>
             </div>
 
-            {/* Insight de IA */}
             <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[2.5rem] p-8 shadow-sm">
                <div className="flex items-center gap-3 mb-2">
                   <span className="material-symbols-outlined text-primary">auto_awesome</span>
@@ -217,12 +259,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                <p className="text-gray-500 italic text-sm leading-relaxed">{aiInsight}</p>
             </div>
 
-            {/* Monitoramento de Equipe */}
             <div className="space-y-4">
                <h3 className="font-black text-xl px-2">Monitoramento de Equipe</h3>
                <div className="grid gap-3">
                   {sellers.map(s => {
-                    const isActive = s.status === 'IN_SERVICE';
+                    const isActive = s.status === 'IN_SERVICE' || !!serviceHistory.find(h => h.vendedor_id === s.id && h.status === 'PENDING');
                     const activeClient = serviceHistory.find(h => h.vendedor_id === s.id && h.status === 'PENDING');
                     
                     return (
@@ -257,7 +298,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                           </button>
                         ) : (
                           <button 
-                            onClick={() => { setEditingSeller(s); setFormData({name: s.name, avatar: s.avatar, status: s.status}); setIsSellerModalOpen(true); }}
+                            onClick={() => { setEditingSeller(s); setFormData({name: s.name, avatar: s.avatar, status: s.status as string}); setIsSellerModalOpen(true); }}
                             className="size-10 flex items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-800 text-gray-400 hover:text-primary transition-colors active:scale-95"
                           >
                             <span className="material-symbols-outlined text-xl">settings</span>
@@ -273,7 +314,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
 
         {activeTab === 'reports' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-             {/* Conteúdo de Auditoria (Mantido conforme versão anterior) */}
              <div className="bg-white dark:bg-gray-900 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col md:flex-row gap-6 items-center">
                 <div className="flex-1 w-full">
                   <h3 className="font-black text-xs uppercase text-gray-400 mb-2 px-2">Filtro de Vendedor</h3>
@@ -393,10 +433,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
           </div>
         )}
 
-        {/* Outras tabs mantidas conforme anterior */}
         {activeTab === 'status' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            <h3 className="font-black text-2xl px-2">Gestão de Status RH</h3>
+            <div className="flex justify-between items-center px-2">
+              <h3 className="font-black text-2xl">Gestão de Status RH</h3>
+              <button 
+                onClick={() => setIsStatusModalOpen(true)}
+                className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-[10px] font-black uppercase hover:bg-primary hover:text-white transition-all"
+              >
+                Novo Status
+              </button>
+            </div>
             <div className="grid gap-3">
               {customStatuses.map(status => (
                 <div key={status.id} className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex items-center justify-between shadow-sm">
@@ -411,6 +458,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                       </p>
                     </div>
                   </div>
+                  <button onClick={() => handleDeleteStatus(status.id)} className="size-10 flex items-center justify-center rounded-xl bg-red-50 text-red-400 hover:bg-red-100 transition-colors">
+                    <span className="material-symbols-outlined">delete</span>
+                  </button>
                 </div>
               ))}
             </div>
@@ -460,6 +510,61 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                <div className="flex gap-4 pt-4">
                  <button type="button" onClick={() => setIsSellerModalOpen(false)} className="flex-1 h-14 rounded-2xl font-black text-gray-400">Cancelar</button>
                  <button type="submit" className="flex-2 px-8 h-14 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20">Salvar Alterações</button>
+               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* NOVO: Modal de Gestão de Status RH */}
+      {isStatusModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-[3rem] p-8 animate-in slide-in-from-bottom duration-300">
+            <h3 className="text-2xl font-black mb-6">Novo Status RH</h3>
+            <form onSubmit={handleStatusSubmit} className="space-y-6">
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Nome do Status</label>
+                 <input 
+                   required
+                   placeholder="Ex: Treinamento, Reunião..."
+                   className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 px-6 font-bold"
+                   value={statusFormData.label}
+                   onChange={e => setStatusFormData({...statusFormData, label: e.target.value})}
+                 />
+               </div>
+               <div className="grid grid-cols-2 gap-4">
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Ícone (Material)</label>
+                   <input 
+                     className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 px-6 font-bold"
+                     value={statusFormData.icon}
+                     onChange={e => setStatusFormData({...statusFormData, icon: e.target.value})}
+                   />
+                 </div>
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Cor</label>
+                   <input 
+                     type="color"
+                     className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 p-1 font-bold cursor-pointer"
+                     value={statusFormData.color}
+                     onChange={e => setStatusFormData({...statusFormData, color: e.target.value})}
+                   />
+                 </div>
+               </div>
+               <div className="space-y-2">
+                 <label className="text-[10px] font-black uppercase text-gray-400 ml-2">Comportamento na Fila</label>
+                 <select 
+                   className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 px-6 font-bold"
+                   value={statusFormData.behavior}
+                   onChange={e => setStatusFormData({...statusFormData, behavior: e.target.value as 'ACTIVE' | 'INACTIVE'})}
+                 >
+                   <option value="INACTIVE">Pausa (Remove da Fila)</option>
+                   <option value="ACTIVE">Ativo (Mantém na Fila)</option>
+                 </select>
+               </div>
+               <div className="flex gap-4 pt-4">
+                 <button type="button" onClick={() => setIsStatusModalOpen(false)} className="flex-1 h-14 rounded-2xl font-black text-gray-400">Cancelar</button>
+                 <button type="submit" className="flex-2 px-8 h-14 bg-primary text-white rounded-2xl font-black shadow-lg shadow-primary/20">Criar Status</button>
                </div>
             </form>
           </div>
