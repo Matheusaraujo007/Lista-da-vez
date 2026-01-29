@@ -38,7 +38,7 @@ export const dbService = {
           cliente_nome TEXT NOT NULL,
           cliente_whatsapp TEXT,
           tipo_atendimento TEXT NOT NULL,
-          venda_realizada BOOLEAN DEFAULT FALSE,
+          venda_realizada BOOLEAN,
           valor_venda NUMERIC(15,2) DEFAULT 0,
           motivo_perda TEXT,
           observacoes TEXT,
@@ -61,6 +61,9 @@ export const dbService = {
 
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS valor_venda NUMERIC(15,2) DEFAULT 0`;
+      
+      // Ajuste para permitir que venda_realizada seja NULL para atendimentos pendentes
+      await sql`ALTER TABLE atendimentos ALTER COLUMN venda_realizada DROP NOT NULL`;
 
       return { success: true };
     } catch (error: any) {
@@ -217,13 +220,13 @@ export const dbService = {
             FROM atendimentos a
             JOIN vendedores v ON v.id = a.vendedor_id
             WHERE a.vendedor_id = ${sellerId}
-            ORDER BY a.criado_em DESC
+            ORDER BY a.status DESC, a.criado_em DESC
           `
         : sql`
             SELECT a.*, v.nome as vendedor_nome, v.avatar_url as vendedor_avatar
             FROM atendimentos a
             JOIN vendedores v ON v.id = a.vendedor_id
-            ORDER BY a.criado_em DESC
+            ORDER BY a.status DESC, a.criado_em DESC
           `;
       return query;
     } catch (e) {
@@ -241,7 +244,7 @@ export const dbService = {
 
   async getAdvancedStats(sellerId?: string) {
     return sellerId 
-      ? sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda FROM atendimentos WHERE vendedor_id = ${sellerId}` 
-      : sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda FROM atendimentos`;
+      ? sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda, status FROM atendimentos WHERE vendedor_id = ${sellerId}` 
+      : sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda, status FROM atendimentos`;
   }
 };
