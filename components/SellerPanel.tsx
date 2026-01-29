@@ -1,11 +1,11 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Seller, SellerStatus } from '../types';
 
 interface SellerPanelProps {
-  seller: Seller & { activeClientName?: string };
+  seller: Seller & { activeClientName?: string; activeServiceId?: string; activeServiceStart?: string };
   queue: Seller[];
-  allSellers: Seller[];
+  allSellers: (Seller & { activeClientName?: string; activeServiceId?: string; activeServiceStart?: string })[];
   onStartService: () => void;
   onFinalizeService: () => void;
   onNavigateToAdmin: () => void;
@@ -21,6 +21,22 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
   onNavigateToAdmin,
   onUpdateStatus
 }) => {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatDuration = (start?: string) => {
+    if (!start) return "0m 00s";
+    const startTime = new Date(start).getTime();
+    const diff = currentTime.getTime() - startTime;
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    return `${minutes}m ${seconds.toString().padStart(2, '0')}s`;
+  };
+
   const isFirst = queue[0]?.id === seller.id;
   const inService = allSellers.filter(s => s.status === 'IN_SERVICE');
   const onBreak = allSellers.filter(s => s.status === 'BREAK' || s.status === 'LUNCH');
@@ -54,7 +70,10 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
                 <div className="flex items-center gap-4">
                   <div className="size-14 bg-white/20 rounded-2xl flex items-center justify-center"><span className="material-symbols-outlined text-3xl">person</span></div>
                   <div>
-                    <p className="font-black text-[10px] uppercase tracking-[0.2em] opacity-80">Cliente em Mesa</p>
+                    <div className="flex items-center gap-2">
+                       <p className="font-black text-[10px] uppercase tracking-[0.2em] opacity-80">Cliente em Mesa</p>
+                       <span className="text-[10px] font-black bg-white/20 px-2 py-0.5 rounded-lg">{formatDuration(seller.activeServiceStart)}</span>
+                    </div>
                     <p className="text-2xl font-black">{seller.activeClientName}</p>
                   </div>
                 </div>
@@ -62,11 +81,59 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
                   onClick={onFinalizeService}
                   className="bg-white text-primary px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl active:scale-90 transition-all"
                 >
-                  Finalizar Agora
+                  Finalizar
                 </button>
              </div>
           </div>
         )}
+
+        {/* Atendimentos em Andamento na Loja */}
+        <div className="space-y-4">
+           <div className="flex justify-between items-center px-2">
+              <h3 className="font-black text-lg">Em Atendimento Agora</h3>
+              <span className="flex items-center gap-1.5 bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-[9px] font-black uppercase">
+                {inService.length} mesas
+              </span>
+           </div>
+           <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+              {inService.length === 0 ? (
+                <div className="w-full bg-white dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 p-8 rounded-[2rem] text-center opacity-40">
+                   <p className="text-[10px] font-black uppercase tracking-widest">Nenhum atendimento ativo</p>
+                </div>
+              ) : (
+                inService.map(s => (
+                  <div key={s.id} className="min-w-[260px] bg-white dark:bg-gray-900 p-4 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                       <div className="size-8 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
+                          <span className="material-symbols-outlined text-lg">person</span>
+                       </div>
+                       <div className="flex-1 overflow-hidden">
+                          <p className="text-[8px] font-black uppercase text-gray-400">Cliente</p>
+                          <p className="font-black text-sm leading-tight truncate">{s.activeClientName}</p>
+                       </div>
+                       <div className="text-right">
+                          <p className="text-[9px] font-black text-blue-500">{formatDuration(s.activeServiceStart)}</p>
+                       </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-50 dark:border-gray-800">
+                       <div className="flex items-center gap-2">
+                         <img src={s.avatar} className="size-6 rounded-full object-cover" />
+                         <p className="text-[9px] font-bold text-gray-500">{s.id === seller.id ? 'Você' : s.name.split(' ')[0]}</p>
+                       </div>
+                       {s.id === seller.id && (
+                         <button 
+                           onClick={onFinalizeService}
+                           className="bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1 rounded-lg text-[8px] font-black uppercase transition-all"
+                         >
+                           Finalizar
+                         </button>
+                       )}
+                    </div>
+                  </div>
+                ))
+              )}
+           </div>
+        </div>
 
         <div className="text-center py-4">
           <h4 className="text-primary text-xs font-bold uppercase tracking-widest mb-1">Fila de Atendimento</h4>
