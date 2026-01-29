@@ -2,92 +2,118 @@
 import React, { useState } from 'react';
 
 interface FinalizeServiceProps {
-  onConfirm: (data: { isSale: boolean; lossReason?: string; observations?: string }) => void;
+  onConfirm: (data: { isSale: boolean; saleValue?: number; lossReason?: string; observations?: string }) => void;
   onBack: () => void;
 }
 
 const FinalizeService: React.FC<FinalizeServiceProps> = ({ onConfirm, onBack }) => {
   const [isSale, setIsSale] = useState(true);
+  const [saleValue, setSaleValue] = useState<string>('');
   const [reason, setReason] = useState('');
   const [observations, setObservations] = useState('');
 
   const handleSubmit = () => {
-    if (!isSale && !reason) return alert('Por favor, selecione o motivo da não venda');
-    onConfirm({ isSale, lossReason: isSale ? undefined : reason, observations });
+    if (isSale && (!saleValue || parseFloat(saleValue) <= 0)) {
+      return alert('Por favor, informe o valor da compra.');
+    }
+    if (!isSale && !reason) return alert('Por favor, selecione o motivo da não venda.');
+    
+    onConfirm({ 
+      isSale, 
+      saleValue: isSale ? parseFloat(saleValue) : 0, 
+      lossReason: isSale ? undefined : reason, 
+      observations 
+    });
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background-light dark:bg-background-dark">
-      <header className="sticky top-0 z-50 bg-white dark:bg-background-dark border-b border-gray-200 dark:border-gray-800">
-        <div className="flex items-center p-4 justify-between max-w-md mx-auto">
-          <button onClick={onBack} className="size-12 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
-            <span className="material-symbols-outlined">arrow_back_ios</span>
-          </button>
-          <h2 className="text-lg font-bold flex-1 text-center pr-12">Finalizar Atendimento</h2>
+    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-background-dark animate-in slide-in-from-bottom duration-500">
+      <header className="sticky top-0 z-50 bg-white/80 dark:bg-background-dark/80 backdrop-blur-xl border-b border-gray-100 dark:border-gray-800 p-5 flex items-center">
+        <button onClick={onBack} className="size-12 flex items-center justify-center rounded-2xl bg-gray-50 dark:bg-gray-800 text-gray-400 active:scale-90 transition-all">
+          <span className="material-symbols-outlined">arrow_back</span>
+        </button>
+        <div className="flex-1 text-center pr-12">
+          <h2 className="text-xl font-black tracking-tight">Finalizar Atendimento</h2>
+          <p className="text-[9px] font-black text-primary uppercase tracking-[0.2em]">Conclusão do Ciclo CRM</p>
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto pb-32">
-        <div className="max-w-md mx-auto p-6 space-y-8">
-          <h3 className="text-2xl font-bold text-center">A venda foi realizada?</h3>
-
-          <div className="bg-gray-100 dark:bg-gray-800 p-1.5 rounded-xl flex gap-1 shadow-inner">
+      <main className="flex-1 max-w-md mx-auto w-full p-6 space-y-10">
+        <div className="space-y-4">
+          <h3 className="text-center font-black text-2xl">A venda foi convertida?</h3>
+          <div className="bg-gray-100 dark:bg-gray-900 p-1.5 rounded-[2rem] flex gap-2">
             <button 
               onClick={() => setIsSale(true)}
-              className={`flex-1 py-4 rounded-lg flex items-center justify-center gap-2 font-bold transition-all ${isSale ? 'bg-white dark:bg-gray-700 text-primary shadow-sm' : 'text-gray-400'}`}
+              className={`flex-1 h-16 rounded-[1.8rem] flex items-center justify-center gap-2 font-black text-lg transition-all ${isSale ? 'bg-white dark:bg-gray-800 text-green-500 shadow-xl' : 'text-gray-400 opacity-60'}`}
             >
-              <span className="material-symbols-outlined">check_circle</span>
+              <span className="material-symbols-outlined font-bold">check_circle</span>
               Sim
             </button>
             <button 
               onClick={() => setIsSale(false)}
-              className={`flex-1 py-4 rounded-lg flex items-center justify-center gap-2 font-bold transition-all ${!isSale ? 'bg-white dark:bg-gray-700 text-red-600 shadow-sm' : 'text-gray-400'}`}
+              className={`flex-1 h-16 rounded-[1.8rem] flex items-center justify-center gap-2 font-black text-lg transition-all ${!isSale ? 'bg-white dark:bg-gray-800 text-red-500 shadow-xl' : 'text-gray-400 opacity-60'}`}
             >
-              <span className="material-symbols-outlined">cancel</span>
+              <span className="material-symbols-outlined font-bold">cancel</span>
               Não
             </button>
           </div>
+        </div>
 
-          {!isSale && (
-            <div className="space-y-2 animate-in fade-in duration-300">
-              <label className="font-semibold block">Motivo da Não Venda</label>
+        <div className="space-y-6">
+          {isSale ? (
+            <div className="space-y-2.5 animate-in zoom-in duration-300">
+              <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Valor da Venda (R$)</label>
+              <div className="relative">
+                <span className="absolute left-6 top-1/2 -translate-y-1/2 font-black text-2xl text-green-500">R$</span>
+                <input 
+                  autoFocus
+                  type="number" 
+                  step="0.01"
+                  placeholder="0,00" 
+                  value={saleValue} 
+                  onChange={e => setSaleValue(e.target.value)} 
+                  className="w-full h-20 bg-white dark:bg-gray-900 border-0 rounded-[2.5rem] pl-16 pr-6 font-black text-4xl focus:ring-4 focus:ring-green-500/10 transition-all shadow-sm" 
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2.5 animate-in slide-in-from-top duration-300">
+              <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Motivo da Não Venda</label>
               <select 
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                className="w-full h-14 rounded-xl border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 focus:ring-primary focus:border-primary"
+                className="w-full h-18 bg-white dark:bg-gray-900 border-0 rounded-[2rem] px-6 font-black text-lg focus:ring-4 focus:ring-red-500/10 transition-all shadow-sm appearance-none"
               >
-                <option value="">Selecione o motivo</option>
-                <option value="preco">Preço alto</option>
-                <option value="estoque">Falta de estoque</option>
-                <option value="pesquisa">Apenas pesquisa</option>
-                <option value="pagamento">Condições de pagamento</option>
+                <option value="">Selecione o motivo...</option>
+                <option value="preco">Preço / Orçamento</option>
+                <option value="estoque">Falta de Estoque</option>
+                <option value="pesquisa">Apenas Pesquisa</option>
+                <option value="pagamento">Condições de Pagamento</option>
                 <option value="outros">Outros motivos</option>
               </select>
             </div>
           )}
 
-          <div className="space-y-2">
-            <label className="font-semibold block">Observações (Opcional)</label>
+          <div className="space-y-2.5">
+            <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Observações Internas</label>
             <textarea 
               value={observations}
               onChange={(e) => setObservations(e.target.value)}
-              className="w-full min-h-[140px] rounded-xl border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 focus:ring-primary focus:border-primary resize-none"
-              placeholder="Descreva detalhes adicionais aqui..."
+              className="w-full h-32 bg-white dark:bg-gray-900 border-0 rounded-[2rem] p-6 font-bold text-base focus:ring-4 focus:ring-primary/10 transition-all shadow-sm resize-none"
+              placeholder="Ex: Cliente prometeu voltar na próxima semana para fechar..."
             />
           </div>
         </div>
       </main>
 
-      <footer className="fixed bottom-0 left-0 right-0 p-6 bg-white dark:bg-background-dark border-t border-gray-100 dark:border-gray-800 z-50">
-        <div className="max-w-md mx-auto">
-          <button 
-            onClick={handleSubmit}
-            className="w-full bg-primary hover:bg-blue-700 text-white font-bold py-4 px-6 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2"
-          >
-            <span className="material-symbols-outlined">done_all</span>
-            Finalizar e Voltar para a Fila
-          </button>
-        </div>
+      <footer className="p-8 bg-white/80 dark:bg-background-dark/80 backdrop-blur-xl border-t border-gray-100 dark:border-gray-800">
+        <button 
+          onClick={handleSubmit}
+          className={`w-full h-18 rounded-[2rem] font-black text-xl shadow-xl transition-all flex items-center justify-center gap-4 active:scale-95 ${isSale ? 'bg-green-500 text-white shadow-green-500/20' : 'bg-red-500 text-white shadow-red-500/20'}`}
+        >
+          <span className="material-symbols-outlined">verified</span>
+          Confirmar e Concluir
+        </button>
       </footer>
     </div>
   );

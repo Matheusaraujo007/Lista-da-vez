@@ -21,7 +21,7 @@ export interface Seller {
   id: string;
   name: string;
   avatar: string;
-  status: SellerStatus | string; // Suporta status nativos e IDs de status customizados
+  status: SellerStatus | string;
   lastServiceAt?: string;
   queuePosition?: number;
 }
@@ -34,6 +34,7 @@ export interface ServiceRecord {
   serviceType: 'COMPRA' | 'TROCA' | 'ORCAMENTO' | 'INFORMACAO';
   status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
   isSale: boolean;
+  saleValue?: number; // Valor da venda em Reais
   lossReason?: string;
   observations?: string;
   createdAt: string;
@@ -43,6 +44,7 @@ export interface ServiceRecord {
 export interface DashboardStats {
   totalServicesToday: number;
   conversionRate: number;
+  totalRevenueToday: number;
   topSeller: {
     name: string;
     salesCount: number;

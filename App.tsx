@@ -11,8 +11,8 @@ import FiscalPanel from './components/FiscalPanel';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'LOGIN' | 'ADMIN' | 'SELLER' | 'FISCAL' | 'START_SERVICE' | 'FINALIZE_SERVICE'>('LOGIN');
-  const [sellers, setSellers] = useState<Seller[]>([]);
-  const [activeService, setActiveService] = useState<ServiceRecord | null>(null);
+  const [sellers, setSellers] = useState<(Seller & { activeClientName?: string, activeServiceId?: string })[]>([]);
+  const [activeService, setActiveService] = useState<Partial<ServiceRecord> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [currentSellerId, setCurrentSellerId] = useState<string | null>(localStorage.getItem('sellerId'));
@@ -37,6 +37,14 @@ const App: React.FC = () => {
       const dbSellers = await dbService.getSellers();
       setSellers(dbSellers);
       
+      // Manter o activeService sincronizado caso o vendedor mude de aba ou recarregue
+      if (currentSellerId) {
+        const current = dbSellers.find(s => s.id === currentSellerId);
+        if (current?.activeServiceId) {
+           setActiveService({ id: current.activeServiceId, sellerId: current.id, clientName: current.activeClientName });
+        }
+      }
+
       if (isAdmin) setView('ADMIN');
       else if (isFiscal) setView('FISCAL');
       else if (currentSellerId && dbSellers.some(s => s.id === currentSellerId)) setView('SELLER');
@@ -52,24 +60,10 @@ const App: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  const handleAdminLogin = () => {
-    setIsAdmin(true);
-    localStorage.setItem('isAdmin', 'true');
-    setView('ADMIN');
-  };
-
-  const handleFiscalLogin = () => {
-    setIsFiscal(true);
-    localStorage.setItem('isFiscal', 'true');
-    setView('FISCAL');
-  };
-
-  const handleSellerLogin = (id: string) => {
-    setCurrentSellerId(id);
-    localStorage.setItem('sellerId', id);
-    setView('SELLER');
-  };
-
+  const handleAdminLogin = () => { setIsAdmin(true); localStorage.setItem('isAdmin', 'true'); setView('ADMIN'); };
+  const handleFiscalLogin = () => { setIsFiscal(true); localStorage.setItem('isFiscal', 'true'); setView('FISCAL'); };
+  const handleSellerLogin = (id: string) => { setCurrentSellerId(id); localStorage.setItem('sellerId', id); setView('SELLER'); };
+  
   const handleLogout = () => {
     localStorage.removeItem('sellerId');
     localStorage.removeItem('isAdmin');
@@ -106,11 +100,13 @@ const App: React.FC = () => {
       };
       const result = await dbService.saveService(newService);
       if (result.success) {
-        if (!isFiscal && targetSellerId === currentSellerId) {
-          setActiveService({ ...newService, id: result.id } as ServiceRecord);
-          setView('FINALIZE_SERVICE');
-        } else setView('FISCAL');
         await updateSellerStatus(targetSellerId, SellerStatus.IN_SERVICE);
+        if (!isFiscal && targetSellerId === currentSellerId) {
+          setActiveService({ ...newService, id: result.id });
+          setView('FINALIZE_SERVICE');
+        } else {
+          setView('FISCAL');
+        }
       }
     } catch (e) {
       alert('Erro ao iniciar atendimento');
@@ -121,17 +117,6 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setDarkMode(!darkMode);
 
-  if (isLoading && view === 'LOGIN') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-background-dark">
-        <div className="text-center space-y-4">
-          <div className="size-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="font-black text-primary animate-pulse tracking-[0.2em] uppercase text-xs">Sincronizando Sistema...</p>
-        </div>
-      </div>
-    );
-  }
-
   const currentSeller = sellers.find(s => s.id === currentSellerId);
   const queue = sellers
     .filter(s => (s.status === 'AVAILABLE' || s.status === SellerStatus.AVAILABLE) && s.queuePosition !== null)
@@ -139,14 +124,9 @@ const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen flex flex-col bg-gray-50 dark:bg-background-dark text-gray-900 dark:text-gray-100 ${isSaving ? 'opacity-70 pointer-events-none' : ''}`}>
-      {/* Botão de Tema Refinado e Posicionado Fora de Áreas de Risco */}
       <div className="fixed bottom-32 right-6 z-[200]">
-        <button 
-          onClick={toggleTheme}
-          className="size-14 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl rounded-full shadow-2xl border border-white/20 flex items-center justify-center active:scale-90 transition-all group"
-          title="Mudar Tema"
-        >
-          <span className={`material-symbols-outlined text-3xl transition-all duration-700 ${darkMode ? 'text-blue-400 rotate-[360deg]' : 'text-yellow-500'}`}>
+        <button onClick={toggleTheme} className="size-14 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl rounded-full shadow-2xl border border-white/20 flex items-center justify-center active:scale-90 transition-all">
+          <span className={`material-symbols-outlined text-3xl ${darkMode ? 'text-blue-400 rotate-180' : 'text-yellow-500'}`}>
             {darkMode ? 'dark_mode' : 'light_mode'}
           </span>
         </button>
@@ -155,10 +135,10 @@ const App: React.FC = () => {
       {view === 'LOGIN' && <Login sellers={sellers} onAdminLogin={handleAdminLogin} onFiscalLogin={handleFiscalLogin} onSellerLogin={handleSellerLogin} />}
       {view === 'ADMIN' && <AdminDashboard sellers={sellers} onNavigateToSeller={handleLogout} onRefresh={loadData} onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} />}
       {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={loadData} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
-      {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
+      {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onFinalizeService={() => setView('FINALIZE_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
       {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal} onCancel={() => setView(isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
       {view === 'FINALIZE_SERVICE' && <FinalizeService onConfirm={async (data) => {
-        if (!activeService || !currentSellerId) return;
+        if (!activeService?.id || !currentSellerId) return;
         setIsSaving(true);
         await dbService.saveService({...activeService, ...data, status: 'COMPLETED'});
         await loadData();
@@ -166,11 +146,6 @@ const App: React.FC = () => {
         setView('SELLER');
         setIsSaving(false);
       }} onBack={() => setView('SELLER')} />}
-
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-      `}</style>
     </div>
   );
 };

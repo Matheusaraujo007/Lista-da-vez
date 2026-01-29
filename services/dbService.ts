@@ -8,7 +8,6 @@ const sql = neon(DATABASE_URL);
 export const dbService = {
   async initDatabase() {
     try {
-      // 1. Criar tabelas se não existirem
       await sql`
         CREATE TABLE IF NOT EXISTS vendedores (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17,17 +16,6 @@ export const dbService = {
           status TEXT DEFAULT 'AVAILABLE',
           posicao_fila INTEGER,
           ultimo_atendimento TIMESTAMPTZ,
-          criado_em TIMESTAMPTZ DEFAULT NOW()
-        );
-      `;
-
-      await sql`
-        CREATE TABLE IF NOT EXISTS status_rh (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          label TEXT NOT NULL,
-          icon TEXT DEFAULT 'info',
-          color TEXT DEFAULT '#6c757d',
-          behavior TEXT DEFAULT 'INACTIVE',
           criado_em TIMESTAMPTZ DEFAULT NOW()
         );
       `;
@@ -51,15 +39,29 @@ export const dbService = {
           cliente_whatsapp TEXT,
           tipo_atendimento TEXT NOT NULL,
           venda_realizada BOOLEAN DEFAULT FALSE,
+          valor_venda NUMERIC(15,2) DEFAULT 0,
           motivo_perda TEXT,
           observacoes TEXT,
+          status TEXT DEFAULT 'PENDING',
           criado_em TIMESTAMPTZ DEFAULT NOW(),
           finalizado_em TIMESTAMPTZ
         );
       `;
 
-      // 2. Migração Crítica: Adicionar coluna status se não existir (evita erro 400/500)
+      await sql`
+        CREATE TABLE IF NOT EXISTS status_rh (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          label TEXT NOT NULL,
+          icon TEXT NOT NULL,
+          color TEXT NOT NULL,
+          behavior TEXT NOT NULL,
+          criado_em TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
+
+      // Migrações de segurança
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
+      await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS valor_venda NUMERIC(15,2) DEFAULT 0`;
 
       return { success: true };
     } catch (error: any) {
@@ -80,9 +82,7 @@ export const dbService = {
         LIMIT 1
       `;
       return res[0] || null;
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { return null; }
   },
 
   async getCustomStatuses(): Promise<CustomStatus[]> {
@@ -98,8 +98,11 @@ export const dbService = {
     } catch (e) { return []; }
   },
 
-  async createCustomStatus(status: Partial<CustomStatus>) {
-    await sql`INSERT INTO status_rh (label, icon, color, behavior) VALUES (${status.label}, ${status.icon}, ${status.color}, ${status.behavior})`;
+  async createCustomStatus(data: { label: string; icon: string; color: string; behavior: 'INACTIVE' | 'ACTIVE' }) {
+    await sql`
+      INSERT INTO status_rh (label, icon, color, behavior)
+      VALUES (${data.label}, ${data.icon}, ${data.color}, ${data.behavior})
+    `;
     return { success: true };
   },
 
@@ -108,14 +111,31 @@ export const dbService = {
     return { success: true };
   },
 
-  async getSellers(): Promise<(Seller & { activeClientName?: string })[]> {
+  async getSellers(): Promise<(Seller & { activeClientName?: string; activeServiceId?: string })[]> {
     try {
+      // Query corrigida: Usa subqueries para garantir 1 única linha por vendedor
+      // Isso evita que o vendedor apareça 3x se houver múltiplos registros de atendimento
       const rows = await sql`
         SELECT 
-          v.id, v.nome as name, v.avatar_url as avatar, v.status, v.posicao_fila as "queuePosition",
-          (SELECT cliente_nome FROM atendimentos WHERE vendedor_id = v.id AND status = 'PENDING' ORDER BY criado_em DESC LIMIT 1) as "activeClientName"
+          v.id, 
+          v.nome as name, 
+          v.avatar_url as avatar, 
+          v.status, 
+          v.posicao_fila as "queuePosition",
+          (
+            SELECT a.cliente_nome 
+            FROM atendimentos a 
+            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
+            ORDER BY a.criado_em DESC LIMIT 1
+          ) as "activeClientName",
+          (
+            SELECT a.id 
+            FROM atendimentos a 
+            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
+            ORDER BY a.criado_em DESC LIMIT 1
+          ) as "activeServiceId"
         FROM vendedores v 
-        ORDER BY v.posicao_fila ASC NULLS LAST
+        ORDER BY v.posicao_fila ASC NULLS LAST, v.nome ASC
       `;
       return rows.map(r => ({
         id: r.id,
@@ -123,33 +143,30 @@ export const dbService = {
         avatar: r.avatar,
         status: r.status,
         queuePosition: r.queuePosition,
-        activeClientName: r.activeClientName || undefined
+        activeClientName: r.activeClientName || undefined,
+        activeServiceId: r.activeServiceId || undefined
       }));
-    } catch (e) {
+    } catch (e) { 
       console.error("Erro ao buscar vendedores:", e);
-      return [];
+      return []; 
     }
-  },
-
-  async createSeller(name: string, avatar: string) {
-    const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
-    const nextPos = Number(maxPosRes[0].max || 0) + 1;
-    await sql`INSERT INTO vendedores (nome, avatar_url, status, posicao_fila) VALUES (${name}, ${avatar}, 'AVAILABLE', ${nextPos})`;
-    return { success: true };
   },
 
   async updateSeller(sellerId: string, data: any) {
     if (!sellerId) return { success: false };
     
-    if (data.nome) await sql`UPDATE vendedores SET nome = ${data.nome} WHERE id = ${sellerId}`;
-    if (data.avatar_url) await sql`UPDATE vendedores SET avatar_url = ${data.avatar_url} WHERE id = ${sellerId}`;
+    if (data.nome || data.avatar_url) {
+       await sql`UPDATE vendedores SET nome = COALESCE(${data.nome}, nome), avatar_url = COALESCE(${data.avatar_url}, avatar_url) WHERE id = ${sellerId}`;
+    }
+
     if (data.status) {
       const isSystemActive = data.status === 'AVAILABLE' || data.status === 'IN_SERVICE' || data.status === 'BREAK' || data.status === 'LUNCH';
       if (!isSystemActive) {
         await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId}`;
       } else {
-        const current = await sql`SELECT posicao_fila FROM vendedores WHERE id = ${sellerId}`;
-        if (current[0].posicao_fila === null && data.status === 'AVAILABLE') {
+        const currentRes = await sql`SELECT posicao_fila FROM vendedores WHERE id = ${sellerId}`;
+        const current = currentRes[0];
+        if (current && current.posicao_fila === null && data.status === 'AVAILABLE') {
            const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
            const nextPos = Number(maxPosRes[0].max || 0) + 1;
            await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
@@ -161,18 +178,11 @@ export const dbService = {
     return { success: true };
   },
 
-  async deleteSeller(id: string) {
-    await sql`DELETE FROM atendimentos WHERE vendedor_id = ${id}`;
-    await sql`DELETE FROM vendedores WHERE id = ${id}`;
-    return { success: true };
-  },
-
   async saveService(service: Partial<ServiceRecord>) {
     try {
       const cleanWhatsapp = service.clientWhatsApp?.replace(/\D/g, '') || '';
       
-      // 1. Upsert no Cliente (CRM)
-      if (cleanWhatsapp) {
+      if (cleanWhatsapp && service.clientName) {
         await sql`
           INSERT INTO clientes (nome, whatsapp, ultimo_vendedor_id, atualizado_em)
           VALUES (${service.clientName}, ${cleanWhatsapp}, ${service.sellerId}, NOW())
@@ -183,11 +193,11 @@ export const dbService = {
         `;
       }
 
-      // 2. Salvar Atendimento
       if (service.id && service.status === 'COMPLETED') {
         await sql`
           UPDATE atendimentos SET 
             venda_realizada = ${service.isSale || false},
+            valor_venda = ${service.saleValue || 0},
             motivo_perda = ${service.lossReason || null},
             observacoes = ${service.observations || null},
             status = 'COMPLETED',
@@ -208,18 +218,21 @@ export const dbService = {
       }
       return { success: true };
     } catch (e: any) {
-      console.error("Erro crítico ao salvar serviço:", e);
+      console.error("Erro ao salvar serviço:", e);
       throw e;
     }
   },
 
+  async createSeller(name: string, avatar: string) {
+    const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
+    const nextPos = Number(maxPosRes[0].max || 0) + 1;
+    await sql`INSERT INTO vendedores (nome, avatar_url, status, posicao_fila) VALUES (${name}, ${avatar}, 'AVAILABLE', ${nextPos})`;
+    return { success: true };
+  },
+
   async getAdvancedStats(sellerId?: string) {
-    try {
-      return sellerId 
-        ? sql`SELECT tipo_atendimento, venda_realizada, motivo_perda FROM atendimentos WHERE vendedor_id = ${sellerId}` 
-        : sql`SELECT tipo_atendimento, venda_realizada, motivo_perda FROM atendimentos`;
-    } catch (e) {
-      return [];
-    }
+    return sellerId 
+      ? sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda FROM atendimentos WHERE vendedor_id = ${sellerId}` 
+      : sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda FROM atendimentos`;
   }
 };
