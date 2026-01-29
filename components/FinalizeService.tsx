@@ -2,11 +2,12 @@
 import React, { useState } from 'react';
 
 interface FinalizeServiceProps {
+  clientName: string;
   onConfirm: (data: { isSale: boolean; saleValue?: number; lossReason?: string; observations?: string }) => void;
   onBack: () => void;
 }
 
-const FinalizeService: React.FC<FinalizeServiceProps> = ({ onConfirm, onBack }) => {
+const FinalizeService: React.FC<FinalizeServiceProps> = ({ clientName, onConfirm, onBack }) => {
   const [isSale, setIsSale] = useState(true);
   const [saleValue, setSaleValue] = useState<string>('');
   const [reason, setReason] = useState('');
@@ -39,6 +40,17 @@ const FinalizeService: React.FC<FinalizeServiceProps> = ({ onConfirm, onBack }) 
       </header>
 
       <main className="flex-1 max-w-md mx-auto w-full p-6 space-y-10">
+        {/* Card do Cliente Atual */}
+        <div className="bg-primary/5 dark:bg-primary/10 p-6 rounded-[2.5rem] border border-primary/20 flex items-center gap-4">
+           <div className="size-12 bg-primary rounded-2xl flex items-center justify-center text-white">
+              <span className="material-symbols-outlined">person</span>
+           </div>
+           <div>
+              <p className="text-[10px] font-black uppercase text-primary/60 tracking-widest">Atendimento de:</p>
+              <p className="text-xl font-black text-primary leading-none">{clientName}</p>
+           </div>
+        </div>
+
         <div className="space-y-4">
           <h3 className="text-center font-black text-2xl">A venda foi convertida?</h3>
           <div className="bg-gray-100 dark:bg-gray-900 p-1.5 rounded-[2rem] flex gap-2">
@@ -64,7 +76,7 @@ const FinalizeService: React.FC<FinalizeServiceProps> = ({ onConfirm, onBack }) 
             <div className="space-y-2.5 animate-in zoom-in duration-300">
               <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Valor da Venda (R$)</label>
               <div className="relative">
-                <span className="absolute left-6 top-1/2 -translate-y-1/2 font-black text-2xl text-green-500">R$</span>
+                <span className="absolute left-8 top-1/2 -translate-y-1/2 font-black text-2xl text-green-500">R$</span>
                 <input 
                   autoFocus
                   type="number" 
@@ -72,7 +84,7 @@ const FinalizeService: React.FC<FinalizeServiceProps> = ({ onConfirm, onBack }) 
                   placeholder="0,00" 
                   value={saleValue} 
                   onChange={e => setSaleValue(e.target.value)} 
-                  className="w-full h-20 bg-white dark:bg-gray-900 border-0 rounded-[2.5rem] pl-16 pr-6 font-black text-4xl focus:ring-4 focus:ring-green-500/10 transition-all shadow-sm" 
+                  className="w-full h-24 bg-white dark:bg-gray-900 border-0 rounded-[2.5rem] pl-20 pr-8 font-black text-5xl focus:ring-4 focus:ring-green-500/10 transition-all shadow-sm" 
                 />
               </div>
             </div>
