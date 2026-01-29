@@ -1,0 +1,7 @@
+{
+  "name": "Lista da Vez Pro",
+  "description": "Um sistema completo de gerenciamento de fila de vendas e dashboard administrativo para equipes comerciais, com foco em otimização de atendimento e métricas de conversão.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
