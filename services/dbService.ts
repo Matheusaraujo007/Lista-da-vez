@@ -20,18 +20,7 @@ export const dbService = {
         );
       `;
 
-      // Tabela de Clientes (CRM)
-      await sql`
-        CREATE TABLE IF NOT EXISTS clientes (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          nome TEXT NOT NULL,
-          whatsapp TEXT UNIQUE NOT NULL,
-          ultimo_vendedor_id UUID,
-          criado_em TIMESTAMPTZ DEFAULT NOW(),
-          atualizado_em TIMESTAMPTZ DEFAULT NOW()
-        );
-      `;
-
+      // Tabela de Vendedores
       await sql`
         CREATE TABLE IF NOT EXISTS vendedores (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -44,10 +33,23 @@ export const dbService = {
         );
       `;
 
+      // Tabela de Clientes (CRM)
+      await sql`
+        CREATE TABLE IF NOT EXISTS clientes (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          nome TEXT NOT NULL,
+          whatsapp TEXT UNIQUE NOT NULL,
+          ultimo_vendedor_id UUID REFERENCES vendedores(id) ON DELETE SET NULL,
+          criado_em TIMESTAMPTZ DEFAULT NOW(),
+          atualizado_em TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
+
+      // Tabela de Atendimentos
       await sql`
         CREATE TABLE IF NOT EXISTS atendimentos (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          vendedor_id UUID REFERENCES vendedores(id),
+          vendedor_id UUID REFERENCES vendedores(id) ON DELETE CASCADE,
           cliente_nome TEXT NOT NULL,
           cliente_whatsapp TEXT,
           tipo_atendimento TEXT NOT NULL,
@@ -68,11 +70,14 @@ export const dbService = {
   },
 
   async getClientByWhatsApp(whatsapp: string) {
+    if (!whatsapp) return null;
+    const cleanWhatsapp = whatsapp.replace(/\D/g, '');
     const res = await sql`
       SELECT c.*, v.nome as nome_vendedor 
       FROM clientes c
       LEFT JOIN vendedores v ON v.id = c.ultimo_vendedor_id
-      WHERE c.whatsapp = ${whatsapp}
+      WHERE c.whatsapp = ${cleanWhatsapp}
+      LIMIT 1
     `;
     return res[0] || null;
   },
@@ -101,31 +106,38 @@ export const dbService = {
   },
 
   async getSellers(): Promise<(Seller & { activeClientName?: string })[]> {
-    const rows = await sql`
-      SELECT 
-        v.id, v.nome as name, v.avatar_url as avatar, v.status, v.posicao_fila as "queuePosition",
-        (SELECT cliente_nome FROM atendimentos WHERE vendedor_id = v.id AND status = 'PENDING' ORDER BY criado_em DESC LIMIT 1) as "activeClientName"
-      FROM vendedores v 
-      ORDER BY v.posicao_fila ASC NULLS LAST
-    `;
-    return rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      avatar: r.avatar,
-      status: r.status,
-      queuePosition: r.queuePosition,
-      activeClientName: r.activeClientName
-    }));
+    try {
+      const rows = await sql`
+        SELECT 
+          v.id, v.nome as name, v.avatar_url as avatar, v.status, v.posicao_fila as "queuePosition",
+          (SELECT cliente_nome FROM atendimentos WHERE vendedor_id = v.id AND status = 'PENDING' ORDER BY criado_em DESC LIMIT 1) as "activeClientName"
+        FROM vendedores v 
+        ORDER BY v.posicao_fila ASC NULLS LAST
+      `;
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        avatar: r.avatar,
+        status: r.status,
+        queuePosition: r.queuePosition,
+        activeClientName: r.activeClientName || undefined
+      }));
+    } catch (e) {
+      console.error("Erro ao buscar vendedores:", e);
+      return [];
+    }
   },
 
   async createSeller(name: string, avatar: string) {
     const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
-    const nextPos = (maxPosRes[0].max || 0) + 1;
+    const nextPos = Number(maxPosRes[0].max || 0) + 1;
     await sql`INSERT INTO vendedores (nome, avatar_url, status, posicao_fila) VALUES (${name}, ${avatar}, 'AVAILABLE', ${nextPos})`;
     return { success: true };
   },
 
   async updateSeller(sellerId: string, data: any) {
+    if (!sellerId) return { success: false };
+    
     if (data.nome) await sql`UPDATE vendedores SET nome = ${data.nome} WHERE id = ${sellerId}`;
     if (data.avatar_url) await sql`UPDATE vendedores SET avatar_url = ${data.avatar_url} WHERE id = ${sellerId}`;
     if (data.status) {
@@ -136,7 +148,7 @@ export const dbService = {
         const current = await sql`SELECT posicao_fila FROM vendedores WHERE id = ${sellerId}`;
         if (current[0].posicao_fila === null && data.status === 'AVAILABLE') {
            const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
-           const nextPos = (maxPosRes[0].max || 0) + 1;
+           const nextPos = Number(maxPosRes[0].max || 0) + 1;
            await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
         } else {
            await sql`UPDATE vendedores SET status = ${data.status} WHERE id = ${sellerId}`;
@@ -153,45 +165,60 @@ export const dbService = {
   },
 
   async saveService(service: Partial<ServiceRecord>) {
-    // 1. Upsert no Cliente
-    if (service.clientWhatsApp) {
-      await sql`
-        INSERT INTO clientes (nome, whatsapp, ultimo_vendedor_id, atualizado_em)
-        VALUES (${service.clientName}, ${service.clientWhatsApp}, ${service.sellerId}, NOW())
-        ON CONFLICT (whatsapp) DO UPDATE SET 
-          nome = EXCLUDED.nome,
-          ultimo_vendedor_id = EXCLUDED.ultimo_vendedor_id,
-          atualizado_em = NOW();
-      `;
-    }
-
-    // 2. Salvar Atendimento
-    if (service.id && service.status === 'COMPLETED') {
-      await sql`
-        UPDATE atendimentos SET 
-          venda_realizada = ${service.isSale || false},
-          motivo_perda = ${service.lossReason || null},
-          observacoes = ${service.observations || null},
-          status = 'COMPLETED',
-          finalizado_em = NOW()
-        WHERE id = ${service.id}
-      `;
+    try {
+      const cleanWhatsapp = service.clientWhatsApp?.replace(/\D/g, '') || '';
       
-      const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
-      const nextPos = (maxPosRes[0].max || 0) + 1;
-      await sql`UPDATE vendedores SET status = 'AVAILABLE', posicao_fila = ${nextPos}, ultimo_atendimento = NOW() WHERE id = ${service.sellerId}`;
-    } else {
-      const res = await sql`
-        INSERT INTO atendimentos (vendedor_id, cliente_nome, cliente_whatsapp, tipo_atendimento, status)
-        VALUES (${service.sellerId}, ${service.clientName}, ${service.clientWhatsApp}, ${service.serviceType}, 'PENDING')
-        RETURNING id;
-      `;
-      return { success: true, id: res[0].id };
+      // 1. Upsert no Cliente (CRM)
+      if (cleanWhatsapp) {
+        await sql`
+          INSERT INTO clientes (nome, whatsapp, ultimo_vendedor_id, atualizado_em)
+          VALUES (${service.clientName}, ${cleanWhatsapp}, ${service.sellerId}, NOW())
+          ON CONFLICT (whatsapp) DO UPDATE SET 
+            nome = EXCLUDED.nome,
+            ultimo_vendedor_id = EXCLUDED.ultimo_vendedor_id,
+            atualizado_em = NOW();
+        `;
+      }
+
+      // 2. Salvar Atendimento
+      if (service.id && service.status === 'COMPLETED') {
+        // Finalização
+        await sql`
+          UPDATE atendimentos SET 
+            venda_realizada = ${service.isSale || false},
+            motivo_perda = ${service.lossReason || null},
+            observacoes = ${service.observations || null},
+            status = 'COMPLETED',
+            finalizado_em = NOW()
+          WHERE id = ${service.id}
+        `;
+        
+        const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
+        const nextPos = Number(maxPosRes[0].max || 0) + 1;
+        await sql`UPDATE vendedores SET status = 'AVAILABLE', posicao_fila = ${nextPos}, ultimo_atendimento = NOW() WHERE id = ${service.sellerId}`;
+      } else {
+        // Início (PENDING)
+        const res = await sql`
+          INSERT INTO atendimentos (vendedor_id, cliente_nome, cliente_whatsapp, tipo_atendimento, status)
+          VALUES (${service.sellerId}, ${service.clientName}, ${cleanWhatsapp}, ${service.serviceType}, 'PENDING')
+          RETURNING id;
+        `;
+        return { success: true, id: res[0].id };
+      }
+      return { success: true };
+    } catch (e: any) {
+      console.error("Erro crítico ao salvar serviço:", e);
+      throw e;
     }
-    return { success: true };
   },
 
   async getAdvancedStats(sellerId?: string) {
-    return sellerId ? sql`SELECT tipo_atendimento, venda_realizada, motivo_perda FROM atendimentos WHERE vendedor_id = ${sellerId}` : sql`SELECT tipo_atendimento, venda_realizada, motivo_perda FROM atendimentos`;
+    try {
+      return sellerId 
+        ? sql`SELECT tipo_atendimento, venda_realizada, motivo_perda FROM atendimentos WHERE vendedor_id = ${sellerId}` 
+        : sql`SELECT tipo_atendimento, venda_realizada, motivo_perda FROM atendimentos`;
+    } catch (e) {
+      return [];
+    }
   }
 };
