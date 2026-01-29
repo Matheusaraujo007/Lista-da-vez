@@ -37,8 +37,8 @@ const App: React.FC = () => {
       const dbSellers = await dbService.getSellers();
       setSellers(dbSellers);
       
-      // Sincroniza o atendimento ativo do vendedor atual
-      if (currentSellerId) {
+      // Sincroniza o atendimento ativo do vendedor atual (apenas se não estiver no Admin)
+      if (currentSellerId && !isAdmin) {
         const current = dbSellers.find(s => s.id === currentSellerId);
         if (current?.activeServiceId) {
            setActiveService({ 
@@ -46,8 +46,6 @@ const App: React.FC = () => {
              sellerId: current.id, 
              clientName: current.activeClientName 
            });
-        } else {
-           setActiveService(null);
         }
       }
 
@@ -107,9 +105,11 @@ const App: React.FC = () => {
       const result = await dbService.saveService(newService);
       if (result.success) {
         await updateSellerStatus(targetSellerId, SellerStatus.IN_SERVICE);
-        if (!isFiscal && targetSellerId === currentSellerId) {
+        if (!isFiscal && !isAdmin && targetSellerId === currentSellerId) {
           setActiveService({ ...newService, id: result.id });
           setView('FINALIZE_SERVICE');
+        } else if (isAdmin) {
+          setView('ADMIN');
         } else {
           setView('FISCAL');
         }
@@ -139,29 +139,40 @@ const App: React.FC = () => {
       </div>
 
       {view === 'LOGIN' && <Login sellers={sellers} onAdminLogin={handleAdminLogin} onFiscalLogin={handleFiscalLogin} onSellerLogin={handleSellerLogin} />}
-      {view === 'ADMIN' && <AdminDashboard sellers={sellers} onNavigateToSeller={handleLogout} onRefresh={loadData} onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} />}
+      {view === 'ADMIN' && (
+        <AdminDashboard 
+          sellers={sellers} 
+          onNavigateToSeller={handleLogout} 
+          onRefresh={loadData} 
+          onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} 
+          onFinalizeService={(service) => {
+            setActiveService(service);
+            setView('FINALIZE_SERVICE');
+          }}
+        />
+      )}
       {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={loadData} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
       {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onFinalizeService={() => setView('FINALIZE_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
-      {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal} onCancel={() => setView(isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
+      {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal || isAdmin} onCancel={() => setView(isAdmin ? 'ADMIN' : isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
       
       {view === 'FINALIZE_SERVICE' && (
         <FinalizeService 
           clientName={activeService?.clientName || 'Cliente'} 
           onConfirm={async (data) => {
-            if (!activeService?.id || !currentSellerId) return;
+            if (!activeService?.id || !activeService?.sellerId) return;
             setIsSaving(true);
             try {
               await dbService.saveService({...activeService, ...data, status: 'COMPLETED'});
               await loadData();
               setActiveService(null);
-              setView('SELLER');
+              setView(isAdmin ? 'ADMIN' : 'SELLER');
             } catch (e) {
               alert('Erro ao finalizar. Verifique os dados.');
             } finally {
               setIsSaving(false);
             }
           }} 
-          onBack={() => setView('SELLER')} 
+          onBack={() => setView(isAdmin ? 'ADMIN' : 'SELLER')} 
         />
       )}
     </div>
