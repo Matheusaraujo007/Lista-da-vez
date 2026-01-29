@@ -3,12 +3,12 @@ import React from 'react';
 import { Seller, SellerStatus } from '../types';
 
 interface SellerPanelProps {
-  seller: Seller;
+  seller: Seller & { activeClientName?: string };
   queue: Seller[];
   allSellers: Seller[];
   onStartService: () => void;
   onNavigateToAdmin: () => void;
-  onUpdateStatus: (status: SellerStatus) => void;
+  onUpdateStatus: (status: string) => void;
 }
 
 const SellerPanel: React.FC<SellerPanelProps> = ({ 
@@ -20,8 +20,8 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
   onUpdateStatus
 }) => {
   const isFirst = queue[0]?.id === seller.id;
-  const inService = allSellers.filter(s => s.status === SellerStatus.IN_SERVICE);
-  const onBreak = allSellers.filter(s => s.status === SellerStatus.BREAK || s.status === SellerStatus.LUNCH);
+  const inService = allSellers.filter(s => s.status === 'IN_SERVICE');
+  const onBreak = allSellers.filter(s => s.status === 'BREAK' || s.status === 'LUNCH');
 
   return (
     <div className="min-h-screen bg-background-light dark:bg-background-dark pb-32">
@@ -33,9 +33,9 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
           <div>
             <h2 className="text-[#111318] dark:text-white text-lg font-bold leading-tight">Olá, {seller.name.split(' ')[0]}</h2>
             <div className="flex items-center gap-1.5">
-               <span className={`size-2 rounded-full ${seller.status === SellerStatus.AVAILABLE ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></span>
+               <span className={`size-2 rounded-full ${seller.status === 'AVAILABLE' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`}></span>
                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                 {seller.status === SellerStatus.AVAILABLE ? 'Disponível' : 'Em Pausa'}
+                 {seller.status === 'AVAILABLE' ? 'Disponível' : seller.status === 'IN_SERVICE' ? 'Em Atendimento' : 'Em Pausa'}
                </p>
             </div>
           </div>
@@ -46,14 +46,28 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
       </header>
 
       <main className="p-4 space-y-6">
+        {seller.status === 'IN_SERVICE' && seller.activeClientName && (
+          <div className="bg-primary p-6 rounded-[2.5rem] text-white shadow-2xl animate-in slide-in-from-top duration-500">
+             <div className="flex items-center gap-4">
+                <div className="size-14 bg-white/20 rounded-2xl flex items-center justify-center"><span className="material-symbols-outlined text-3xl">person</span></div>
+                <div>
+                   <p className="font-black text-[10px] uppercase tracking-[0.2em] opacity-80">Cliente em Mesa</p>
+                   <p className="text-2xl font-black">{seller.activeClientName}</p>
+                </div>
+             </div>
+          </div>
+        )}
+
         <div className="text-center py-4">
           <h4 className="text-primary text-xs font-bold uppercase tracking-widest mb-1">Fila de Atendimento</h4>
           <h2 className="text-[#111318] dark:text-white text-3xl font-extrabold leading-tight">
-            {seller.status !== SellerStatus.AVAILABLE 
-              ? 'Você está em pausa' 
-              : isFirst 
-                ? 'Você é o próximo!' 
-                : `Sua posição: ${queue.findIndex(s => s.id === seller.id) + 1}º`}
+            {seller.status === 'IN_SERVICE' 
+              ? 'Bom Atendimento!' 
+              : seller.status !== 'AVAILABLE'
+                ? 'Você está em pausa' 
+                : isFirst 
+                  ? 'Você é o próximo!' 
+                  : `Sua posição: ${queue.findIndex(s => s.id === seller.id) + 1}º`}
           </h2>
         </div>
 
@@ -61,7 +75,7 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
           <div className="flex justify-between items-center">
             <p className="font-semibold">Progresso da Fila</p>
             <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-sm font-bold">
-              {seller.status === SellerStatus.AVAILABLE 
+              {seller.status === 'AVAILABLE' 
                 ? `${queue.findIndex(s => s.id === seller.id) + 1}º da vez` 
                 : '--'}
             </span>
@@ -69,17 +83,16 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
           <div className="h-2.5 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
             <div 
               className={`h-full bg-primary transition-all duration-700 ease-out`} 
-              style={{ width: seller.status === SellerStatus.AVAILABLE ? `${Math.max(10, 100 - (queue.findIndex(s => s.id === seller.id) * 20))}%` : '0%' }}
+              style={{ width: seller.status === 'AVAILABLE' ? `${Math.max(10, 100 - (queue.findIndex(s => s.id === seller.id) * 20))}%` : '0%' }}
             ></div>
           </div>
-          <p className="text-gray-400 text-[11px] text-center italic">A fila avança conforme os atendimentos são finalizados.</p>
         </div>
 
         <button 
           onClick={onStartService}
-          disabled={!isFirst || seller.status !== SellerStatus.AVAILABLE}
-          className={`w-full font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 text-lg active:scale-95 transition-all
-            ${isFirst && seller.status === SellerStatus.AVAILABLE 
+          disabled={!isFirst || seller.status !== 'AVAILABLE'}
+          className={`w-full font-bold py-5 rounded-[2rem] shadow-lg flex items-center justify-center gap-2 text-lg active:scale-95 transition-all
+            ${isFirst && seller.status === 'AVAILABLE' 
               ? 'bg-primary text-white shadow-primary/30 hover:bg-blue-700' 
               : 'bg-gray-200 text-gray-400 dark:bg-gray-800 cursor-not-allowed shadow-none'}
           `}
@@ -105,9 +118,8 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
                 <img src={s.avatar} alt={s.name} className="size-12 rounded-lg object-cover" />
                 <div className="flex-1 ml-3">
                   <p className={`font-bold ${s.id === seller.id ? 'text-primary' : ''}`}>{s.id === seller.id ? 'Você' : s.name}</p>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-tighter">Aguardando desde 14:20</p>
+                  <p className="text-[10px] text-gray-400 uppercase tracking-tighter">Aguardando na vez</p>
                 </div>
-                {s.id === seller.id && <span className="material-symbols-outlined text-primary animate-bounce">expand_less</span>}
               </div>
             ))}
           </div>
@@ -119,30 +131,29 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
         </div>
       </main>
 
-      {/* Barra de Status Inferior Funcional */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-md bg-white dark:bg-gray-900 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.3)] rounded-2xl border border-gray-100 dark:border-gray-800 p-2 flex justify-between items-center z-50">
+      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-md bg-white dark:bg-gray-900 shadow-2xl rounded-3xl border border-gray-100 dark:border-gray-800 p-2 flex justify-between items-center z-50">
         <StatusAction 
           icon="check_circle" 
           label="Disponível" 
-          active={seller.status === SellerStatus.AVAILABLE} 
-          onClick={() => onUpdateStatus(SellerStatus.AVAILABLE)}
+          active={seller.status === 'AVAILABLE'} 
+          onClick={() => onUpdateStatus('AVAILABLE')}
         />
         <StatusAction 
           icon="schedule" 
           label="Pausa" 
-          active={seller.status === SellerStatus.BREAK} 
-          onClick={() => onUpdateStatus(SellerStatus.BREAK)}
+          active={seller.status === 'BREAK'} 
+          onClick={() => onUpdateStatus('BREAK')}
         />
         <StatusAction 
           icon="restaurant" 
           label="Almoço" 
-          active={seller.status === SellerStatus.LUNCH} 
-          onClick={() => onUpdateStatus(SellerStatus.LUNCH)}
+          active={seller.status === 'LUNCH'} 
+          onClick={() => onUpdateStatus('LUNCH')}
         />
         <StatusAction 
           icon="history" 
           label="Histórico" 
-          onClick={() => alert('Em breve: Histórico de atendimentos')}
+          onClick={() => alert('Recurso em breve')}
         />
       </div>
     </div>
@@ -164,7 +175,6 @@ const StatusSummary: React.FC<{ icon: string; title: string; count: number; sell
           +{count - 3}
         </div>
       )}
-      {count === 0 && <span className="text-xs text-gray-400">Nenhum</span>}
     </div>
   </div>
 );
@@ -172,7 +182,7 @@ const StatusSummary: React.FC<{ icon: string; title: string; count: number; sell
 const StatusAction: React.FC<{ icon: string; label: string; active?: boolean; onClick: () => void }> = ({ icon, label, active, onClick }) => (
   <button 
     onClick={onClick}
-    className={`flex-1 py-2 flex flex-col items-center justify-center transition-all rounded-xl ${active ? 'text-primary bg-primary/5' : 'text-gray-400 hover:text-gray-600'}`}
+    className={`flex-1 py-2 flex flex-col items-center justify-center transition-all rounded-2xl ${active ? 'text-primary bg-primary/5' : 'text-gray-400 hover:text-gray-600'}`}
   >
     <span className="material-symbols-outlined text-2xl">{icon}</span>
     <span className="text-[10px] font-bold mt-0.5">{label}</span>

@@ -4,14 +4,24 @@ export enum SellerStatus {
   IN_SERVICE = 'IN_SERVICE',
   BREAK = 'BREAK',
   LUNCH = 'LUNCH',
-  AWAY = 'AWAY'
+  AWAY = 'AWAY',
+  VACATION = 'VACATION',
+  MATERNITY_LEAVE = 'MATERNITY_LEAVE'
+}
+
+export interface CustomStatus {
+  id: string;
+  label: string;
+  icon: string;
+  color: string;
+  behavior: 'INACTIVE' | 'ACTIVE';
 }
 
 export interface Seller {
   id: string;
   name: string;
   avatar: string;
-  status: SellerStatus;
+  status: SellerStatus | string; // Suporta status nativos e IDs de status customizados
   lastServiceAt?: string;
   queuePosition?: number;
 }
@@ -38,9 +48,4 @@ export interface DashboardStats {
     salesCount: number;
     avatar: string;
   };
-  lossReasons: {
-    name: string;
-    value: number;
-    color: string;
-  }[];
 }

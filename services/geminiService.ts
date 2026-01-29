@@ -2,7 +2,8 @@
 import { GoogleGenAI } from "@google/genai";
 
 export const getDashboardInsights = async (stats: any) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Always use the named parameter for API Key and do not provide fallbacks
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `Como um consultor de vendas sênior, analise estes dados de hoje:
   - Atendimentos: ${stats.totalServicesToday}
@@ -18,6 +19,7 @@ export const getDashboardInsights = async (stats: any) => {
         thinkingConfig: { thinkingBudget: 0 }
       }
     });
+    // Access .text property directly, do not call as a method
     return response.text;
   } catch (error) {
     console.error("Gemini Error:", error);

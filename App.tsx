@@ -20,7 +20,6 @@ const App: React.FC = () => {
   const [isFiscal, setIsFiscal] = useState(localStorage.getItem('isFiscal') === 'true');
   const [darkMode, setDarkMode] = useState(localStorage.getItem('theme') === 'dark');
 
-  // Sincronização de Tema
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark');
@@ -38,16 +37,10 @@ const App: React.FC = () => {
       const dbSellers = await dbService.getSellers();
       setSellers(dbSellers);
       
-      // Decidir view baseada no login persistido
-      if (isAdmin) {
-        setView('ADMIN');
-      } else if (isFiscal) {
-        setView('FISCAL');
-      } else if (currentSellerId && dbSellers.some(s => s.id === currentSellerId)) {
-        setView('SELLER');
-      } else {
-        setView('LOGIN');
-      }
+      if (isAdmin) setView('ADMIN');
+      else if (isFiscal) setView('FISCAL');
+      else if (currentSellerId && dbSellers.some(s => s.id === currentSellerId)) setView('SELLER');
+      else setView('LOGIN');
     } catch (error) {
       console.error("Erro ao sincronizar dados:", error);
     } finally {
@@ -87,7 +80,7 @@ const App: React.FC = () => {
     setView('LOGIN');
   };
 
-  const updateSellerStatus = useCallback(async (id: string, newStatus: SellerStatus) => {
+  const updateSellerStatus = useCallback(async (id: string, newStatus: string) => {
     setIsSaving(true);
     try {
       await dbService.updateSeller(id, { status: newStatus });
@@ -100,7 +93,6 @@ const App: React.FC = () => {
   const handleStartService = async (data: { clientName: string; clientWhatsApp: string; serviceType: any, assignedSellerId?: string }) => {
     const targetSellerId = data.assignedSellerId || currentSellerId;
     if (!targetSellerId) return;
-
     setIsSaving(true);
     try {
       const newService: Partial<ServiceRecord> = {
@@ -112,40 +104,16 @@ const App: React.FC = () => {
         isSale: false,
         createdAt: new Date().toISOString(),
       };
-      
       const result = await dbService.saveService(newService);
       if (result.success) {
-        // Se for o próprio vendedor iniciando, ele vai para a tela de finalizar
         if (!isFiscal && targetSellerId === currentSellerId) {
           setActiveService({ ...newService, id: result.id } as ServiceRecord);
           setView('FINALIZE_SERVICE');
-        } else {
-          // Se for o fiscal, ele volta para o painel de controle
-          setView('FISCAL');
-        }
-        // Atualiza status para IN_SERVICE (independente de já estar, o banco lida)
+        } else setView('FISCAL');
         await updateSellerStatus(targetSellerId, SellerStatus.IN_SERVICE);
       }
     } catch (e) {
       alert('Erro ao iniciar atendimento');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleFinalizeService = async (data: { isSale: boolean; lossReason?: string; observations?: string }) => {
-    if (!activeService || !currentSellerId) return;
-    setIsSaving(true);
-    try {
-      await dbService.saveService({
-        ...activeService,
-        ...data,
-        status: 'COMPLETED',
-        completedAt: new Date().toISOString()
-      });
-      await loadData();
-      setActiveService(null);
-      setView('SELLER');
     } finally {
       setIsSaving(false);
     }
@@ -166,76 +134,38 @@ const App: React.FC = () => {
 
   const currentSeller = sellers.find(s => s.id === currentSellerId);
   const queue = sellers
-    .filter(s => s.status === SellerStatus.AVAILABLE && s.queuePosition !== null)
+    .filter(s => (s.status === 'AVAILABLE' || s.status === SellerStatus.AVAILABLE) && s.queuePosition !== null)
     .sort((a, b) => (a.queuePosition || 0) - (b.queuePosition || 0));
 
   return (
-    <div className={`min-h-screen flex flex-col bg-gray-50 dark:bg-background-dark text-gray-900 dark:text-gray-100 ${isSaving ? 'opacity-70 pointer-events-none transition-opacity' : ''}`}>
-      {/* Botão de Tema Flutuante Premium */}
-      <button 
-        onClick={toggleTheme}
-        className="fixed top-5 right-5 z-[100] size-12 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50 flex items-center justify-center active:scale-90 transition-all hover:rotate-12 group"
-      >
-        <span className={`material-symbols-outlined transition-colors duration-500 ${darkMode ? 'text-blue-400' : 'text-yellow-500'}`}>
-          {darkMode ? 'dark_mode' : 'light_mode'}
-        </span>
-      </button>
+    <div className={`min-h-screen flex flex-col bg-gray-50 dark:bg-background-dark text-gray-900 dark:text-gray-100 ${isSaving ? 'opacity-70 pointer-events-none' : ''}`}>
+      {/* Botão de Tema Refinado e Posicionado Fora de Áreas de Risco */}
+      <div className="fixed bottom-32 right-6 z-[200]">
+        <button 
+          onClick={toggleTheme}
+          className="size-14 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl rounded-full shadow-2xl border border-white/20 flex items-center justify-center active:scale-90 transition-all group"
+          title="Mudar Tema"
+        >
+          <span className={`material-symbols-outlined text-3xl transition-all duration-700 ${darkMode ? 'text-blue-400 rotate-[360deg]' : 'text-yellow-500'}`}>
+            {darkMode ? 'dark_mode' : 'light_mode'}
+          </span>
+        </button>
+      </div>
 
-      {view === 'LOGIN' && (
-        <Login 
-          sellers={sellers} 
-          onAdminLogin={handleAdminLogin} 
-          onFiscalLogin={handleFiscalLogin} 
-          onSellerLogin={handleSellerLogin} 
-        />
-      )}
-      
-      {view === 'ADMIN' && (
-        <AdminDashboard 
-          sellers={sellers} 
-          onNavigateToSeller={handleLogout} 
-          onRefresh={loadData} 
-          onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} 
-        />
-      )}
-      
-      {view === 'FISCAL' && (
-        <FiscalPanel 
-          sellers={sellers} 
-          queue={queue} 
-          onLogout={handleLogout} 
-          onRefresh={loadData} 
-          onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} 
-          onUpdateStatus={updateSellerStatus} 
-        />
-      )}
-
-      {view === 'SELLER' && currentSeller && (
-        <SellerPanel 
-          seller={currentSeller} 
-          queue={queue} 
-          allSellers={sellers} 
-          onStartService={() => setView('START_SERVICE')} 
-          onNavigateToAdmin={handleLogout} 
-          onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} 
-        />
-      )}
-      
-      {view === 'START_SERVICE' && (
-        <StartService 
-          seller={sellers.find(s => s.id === currentSellerId)!} 
-          isFiscal={isFiscal}
-          onCancel={() => setView(isFiscal ? 'FISCAL' : 'SELLER')} 
-          onConfirm={handleStartService} 
-        />
-      )}
-      
-      {view === 'FINALIZE_SERVICE' && (
-        <FinalizeService 
-          onConfirm={handleFinalizeService} 
-          onBack={() => setView('SELLER')} 
-        />
-      )}
+      {view === 'LOGIN' && <Login sellers={sellers} onAdminLogin={handleAdminLogin} onFiscalLogin={handleFiscalLogin} onSellerLogin={handleSellerLogin} />}
+      {view === 'ADMIN' && <AdminDashboard sellers={sellers} onNavigateToSeller={handleLogout} onRefresh={loadData} onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} />}
+      {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={loadData} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
+      {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
+      {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal} onCancel={() => setView(isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
+      {view === 'FINALIZE_SERVICE' && <FinalizeService onConfirm={async (data) => {
+        if (!activeService || !currentSellerId) return;
+        setIsSaving(true);
+        await dbService.saveService({...activeService, ...data, status: 'COMPLETED'});
+        await loadData();
+        setActiveService(null);
+        setView('SELLER');
+        setIsSaving(false);
+      }} onBack={() => setView('SELLER')} />}
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
