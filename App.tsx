@@ -11,7 +11,7 @@ import FiscalPanel from './components/FiscalPanel';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'LOGIN' | 'ADMIN' | 'SELLER' | 'FISCAL' | 'START_SERVICE' | 'FINALIZE_SERVICE'>('LOGIN');
-  const [sellers, setSellers] = useState<(Seller & { activeClientName?: string, activeServiceId?: string })[]>([]);
+  const [sellers, setSellers] = useState<(Seller & { activeClientName?: string, activeServiceId?: string, activeServiceStart?: string })[]>([]);
   const [activeService, setActiveService] = useState<Partial<ServiceRecord> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,38 +30,46 @@ const App: React.FC = () => {
     }
   }, [darkMode]);
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  const loadData = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
     try {
       await dbService.initDatabase();
       const dbSellers = await dbService.getSellers();
       setSellers(dbSellers);
       
-      // Sincroniza o atendimento ativo do vendedor atual (apenas se não estiver no Admin)
       if (currentSellerId && !isAdmin) {
         const current = dbSellers.find(s => s.id === currentSellerId);
         if (current?.activeServiceId) {
            setActiveService({ 
              id: current.activeServiceId, 
              sellerId: current.id, 
-             clientName: current.activeClientName 
+             clientName: current.activeClientName,
+             createdAt: current.activeServiceStart
            });
+        } else {
+           setActiveService(null);
         }
       }
 
-      if (isAdmin) setView('ADMIN');
-      else if (isFiscal) setView('FISCAL');
-      else if (currentSellerId && dbSellers.some(s => s.id === currentSellerId)) setView('SELLER');
-      else setView('LOGIN');
+      // Define a visão inicial apenas no primeiro carregamento
+      if (showLoading) {
+        if (isAdmin) setView('ADMIN');
+        else if (isFiscal) setView('FISCAL');
+        else if (currentSellerId && dbSellers.some(s => s.id === currentSellerId)) setView('SELLER');
+        else setView('LOGIN');
+      }
     } catch (error) {
       console.error("Erro ao sincronizar dados:", error);
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
     }
   }, [currentSellerId, isAdmin, isFiscal]);
 
+  // Polling para manter a lista atualizada para todos
   useEffect(() => {
     loadData();
+    const interval = setInterval(() => loadData(false), 10000); // Atualiza a cada 10s
+    return () => clearInterval(interval);
   }, [loadData]);
 
   const handleAdminLogin = () => { setIsAdmin(true); localStorage.setItem('isAdmin', 'true'); setView('ADMIN'); };
@@ -82,7 +90,7 @@ const App: React.FC = () => {
     setIsSaving(true);
     try {
       await dbService.updateSeller(id, { status: newStatus });
-      await loadData();
+      await loadData(false);
     } finally {
       setIsSaving(false);
     }
@@ -108,11 +116,10 @@ const App: React.FC = () => {
         if (!isFiscal && !isAdmin && targetSellerId === currentSellerId) {
           setActiveService({ ...newService, id: result.id });
           setView('FINALIZE_SERVICE');
-        } else if (isAdmin) {
-          setView('ADMIN');
         } else {
-          setView('FISCAL');
+          setView(isAdmin ? 'ADMIN' : 'FISCAL');
         }
+        await loadData(false);
       }
     } catch (e) {
       alert('Erro ao iniciar atendimento');
@@ -120,8 +127,6 @@ const App: React.FC = () => {
       setIsSaving(false);
     }
   };
-
-  const toggleTheme = () => setDarkMode(!darkMode);
 
   const currentSeller = sellers.find(s => s.id === currentSellerId);
   const queue = sellers
@@ -131,7 +136,7 @@ const App: React.FC = () => {
   return (
     <div className={`min-h-screen flex flex-col bg-gray-50 dark:bg-background-dark text-gray-900 dark:text-gray-100 ${isSaving ? 'opacity-70 pointer-events-none' : ''}`}>
       <div className="fixed bottom-32 right-6 z-[200]">
-        <button onClick={toggleTheme} className="size-14 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl rounded-full shadow-2xl border border-white/20 flex items-center justify-center active:scale-90 transition-all">
+        <button onClick={() => setDarkMode(!darkMode)} className="size-14 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl rounded-full shadow-2xl border border-white/20 flex items-center justify-center active:scale-90 transition-all">
           <span className={`material-symbols-outlined text-3xl ${darkMode ? 'text-blue-400 rotate-180' : 'text-yellow-500'}`}>
             {darkMode ? 'dark_mode' : 'light_mode'}
           </span>
@@ -143,7 +148,7 @@ const App: React.FC = () => {
         <AdminDashboard 
           sellers={sellers} 
           onNavigateToSeller={handleLogout} 
-          onRefresh={loadData} 
+          onRefresh={() => loadData(false)} 
           onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} 
           onFinalizeService={(service) => {
             setActiveService(service);
@@ -151,7 +156,7 @@ const App: React.FC = () => {
           }}
         />
       )}
-      {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={loadData} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
+      {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={() => loadData(false)} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
       {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onFinalizeService={() => setView('FINALIZE_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
       {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal || isAdmin} onCancel={() => setView(isAdmin ? 'ADMIN' : isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
       
@@ -163,7 +168,7 @@ const App: React.FC = () => {
             setIsSaving(true);
             try {
               await dbService.saveService({...activeService, ...data, status: 'COMPLETED'});
-              await loadData();
+              await loadData(false);
               setActiveService(null);
               setView(isAdmin ? 'ADMIN' : 'SELLER');
             } catch (e) {
