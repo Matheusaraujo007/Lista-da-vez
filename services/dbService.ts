@@ -62,7 +62,6 @@ export const dbService = {
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS valor_venda NUMERIC(15,2) DEFAULT 0`;
       
-      // Ajuste para permitir que venda_realizada seja NULL para atendimentos pendentes
       await sql`ALTER TABLE atendimentos ALTER COLUMN venda_realizada DROP NOT NULL`;
 
       return { success: true };
@@ -113,7 +112,7 @@ export const dbService = {
     return { success: true };
   },
 
-  async getSellers(): Promise<(Seller & { activeClientName?: string; activeServiceId?: string })[]> {
+  async getSellers(): Promise<(Seller & { activeClientName?: string; activeServiceId?: string; activeServiceStart?: string })[]> {
     try {
       const rows = await sql`
         SELECT 
@@ -133,7 +132,13 @@ export const dbService = {
             FROM atendimentos a 
             WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
             ORDER BY a.criado_em DESC LIMIT 1
-          ) as "activeServiceId"
+          ) as "activeServiceId",
+          (
+            SELECT a.criado_em 
+            FROM atendimentos a 
+            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
+            ORDER BY a.criado_em DESC LIMIT 1
+          ) as "activeServiceStart"
         FROM vendedores v 
         ORDER BY v.posicao_fila ASC NULLS LAST, v.nome ASC
       `;
@@ -144,7 +149,8 @@ export const dbService = {
         status: r.status,
         queuePosition: r.queuePosition,
         activeClientName: r.activeClientName || undefined,
-        activeServiceId: r.activeServiceId || undefined
+        activeServiceId: r.activeServiceId || undefined,
+        activeServiceStart: r.activeServiceStart || undefined
       }));
     } catch (e) { return []; }
   },
