@@ -71,7 +71,6 @@ export const dbService = {
 
   async createSeller(name: string, avatar: string) {
     try {
-      // Pega a última posição para colocar o novo vendedor no fim da fila
       const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
       const nextPos = (maxPosRes[0].max || 0) + 1;
       
@@ -118,12 +117,25 @@ export const dbService = {
 
   async updateSeller(sellerId: string, data: any) {
     try {
-      if (data.status === SellerStatus.AVAILABLE) {
-        const maxPosRes = await sql`SELECT MAX(posicao_fila) as max FROM vendedores`;
-        const nextPos = (maxPosRes[0].max || 0) + 1;
-        await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
-      } else {
-        await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId} `;
+      // Se tiver nome ou avatar, é uma edição de perfil
+      if (data.nome || data.avatar_url) {
+        await sql`
+          UPDATE vendedores 
+          SET nome = COALESCE(${data.nome}, nome), 
+              avatar_url = COALESCE(${data.avatar_url}, avatar_url)
+          WHERE id = ${sellerId}
+        `;
+      } 
+      
+      // Se tiver status, é uma atualização de fila
+      if (data.status) {
+        if (data.status === SellerStatus.AVAILABLE) {
+          const maxPosRes = await sql`SELECT MAX(posicao_fila) as max FROM vendedores`;
+          const nextPos = (maxPosRes[0].max || 0) + 1;
+          await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
+        } else {
+          await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId} `;
+        }
       }
       return { success: true };
     } catch (e) {
