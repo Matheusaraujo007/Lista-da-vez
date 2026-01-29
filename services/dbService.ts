@@ -8,19 +8,7 @@ const sql = neon(DATABASE_URL);
 export const dbService = {
   async initDatabase() {
     try {
-      // Tabela de Status RH
-      await sql`
-        CREATE TABLE IF NOT EXISTS status_rh (
-          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-          label TEXT NOT NULL,
-          icon TEXT DEFAULT 'info',
-          color TEXT DEFAULT '#6c757d',
-          behavior TEXT DEFAULT 'INACTIVE',
-          criado_em TIMESTAMPTZ DEFAULT NOW()
-        );
-      `;
-
-      // Tabela de Vendedores
+      // 1. Criar tabelas se não existirem
       await sql`
         CREATE TABLE IF NOT EXISTS vendedores (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,7 +21,17 @@ export const dbService = {
         );
       `;
 
-      // Tabela de Clientes (CRM)
+      await sql`
+        CREATE TABLE IF NOT EXISTS status_rh (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          label TEXT NOT NULL,
+          icon TEXT DEFAULT 'info',
+          color TEXT DEFAULT '#6c757d',
+          behavior TEXT DEFAULT 'INACTIVE',
+          criado_em TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
+
       await sql`
         CREATE TABLE IF NOT EXISTS clientes (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -45,7 +43,6 @@ export const dbService = {
         );
       `;
 
-      // Tabela de Atendimentos
       await sql`
         CREATE TABLE IF NOT EXISTS atendimentos (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -56,11 +53,13 @@ export const dbService = {
           venda_realizada BOOLEAN DEFAULT FALSE,
           motivo_perda TEXT,
           observacoes TEXT,
-          status TEXT DEFAULT 'PENDING',
           criado_em TIMESTAMPTZ DEFAULT NOW(),
           finalizado_em TIMESTAMPTZ
         );
       `;
+
+      // 2. Migração Crítica: Adicionar coluna status se não existir (evita erro 400/500)
+      await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
 
       return { success: true };
     } catch (error: any) {
@@ -72,14 +71,18 @@ export const dbService = {
   async getClientByWhatsApp(whatsapp: string) {
     if (!whatsapp) return null;
     const cleanWhatsapp = whatsapp.replace(/\D/g, '');
-    const res = await sql`
-      SELECT c.*, v.nome as nome_vendedor 
-      FROM clientes c
-      LEFT JOIN vendedores v ON v.id = c.ultimo_vendedor_id
-      WHERE c.whatsapp = ${cleanWhatsapp}
-      LIMIT 1
-    `;
-    return res[0] || null;
+    try {
+      const res = await sql`
+        SELECT c.*, v.nome as nome_vendedor 
+        FROM clientes c
+        LEFT JOIN vendedores v ON v.id = c.ultimo_vendedor_id
+        WHERE c.whatsapp = ${cleanWhatsapp}
+        LIMIT 1
+      `;
+      return res[0] || null;
+    } catch (e) {
+      return null;
+    }
   },
 
   async getCustomStatuses(): Promise<CustomStatus[]> {
@@ -182,7 +185,6 @@ export const dbService = {
 
       // 2. Salvar Atendimento
       if (service.id && service.status === 'COMPLETED') {
-        // Finalização
         await sql`
           UPDATE atendimentos SET 
             venda_realizada = ${service.isSale || false},
@@ -197,7 +199,6 @@ export const dbService = {
         const nextPos = Number(maxPosRes[0].max || 0) + 1;
         await sql`UPDATE vendedores SET status = 'AVAILABLE', posicao_fila = ${nextPos}, ultimo_atendimento = NOW() WHERE id = ${service.sellerId}`;
       } else {
-        // Início (PENDING)
         const res = await sql`
           INSERT INTO atendimentos (vendedor_id, cliente_nome, cliente_whatsapp, tipo_atendimento, status)
           VALUES (${service.sellerId}, ${service.clientName}, ${cleanWhatsapp}, ${service.serviceType}, 'PENDING')
