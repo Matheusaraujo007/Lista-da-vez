@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Seller, SellerStatus } from '../types';
 
 interface SellerPanelProps {
@@ -38,7 +38,12 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
   };
 
   const isFirst = queue[0]?.id === seller.id;
-  const inService = allSellers.filter(s => s.status === 'IN_SERVICE');
+  
+  // FIX: Filtra por vendedores que realmente possuem um cliente ativo no banco de dados
+  const activeServices = useMemo(() => {
+    return allSellers.filter(s => s.activeClientName);
+  }, [allSellers]);
+
   const onBreak = allSellers.filter(s => s.status === 'BREAK' || s.status === 'LUNCH');
 
   return (
@@ -64,7 +69,7 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
       </header>
 
       <main className="p-4 space-y-6">
-        {seller.status === 'IN_SERVICE' && seller.activeClientName && (
+        {seller.activeClientName && (
           <div className="bg-primary p-6 rounded-[2.5rem] text-white shadow-2xl animate-in slide-in-from-top duration-500 border-b-8 border-primary-dark">
              <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -87,21 +92,21 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
           </div>
         )}
 
-        {/* Atendimentos em Andamento na Loja */}
+        {/* Monitoramento da Loja (Em Atendimento Agora) */}
         <div className="space-y-4">
            <div className="flex justify-between items-center px-2">
               <h3 className="font-black text-lg">Em Atendimento Agora</h3>
               <span className="flex items-center gap-1.5 bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-[9px] font-black uppercase">
-                {inService.length} mesas
+                {activeServices.length} mesas
               </span>
            </div>
            <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
-              {inService.length === 0 ? (
+              {activeServices.length === 0 ? (
                 <div className="w-full bg-white dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 p-8 rounded-[2rem] text-center opacity-40">
                    <p className="text-[10px] font-black uppercase tracking-widest">Nenhum atendimento ativo</p>
                 </div>
               ) : (
-                inService.map(s => (
+                activeServices.map(s => (
                   <div key={s.id} className="min-w-[260px] bg-white dark:bg-gray-900 p-4 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-3">
                     <div className="flex items-center gap-3">
                        <div className="size-8 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
@@ -138,7 +143,7 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
         <div className="text-center py-4">
           <h4 className="text-primary text-xs font-bold uppercase tracking-widest mb-1">Fila de Atendimento</h4>
           <h2 className="text-[#111318] dark:text-white text-3xl font-extrabold leading-tight">
-            {seller.status === 'IN_SERVICE' 
+            {seller.activeClientName 
               ? 'Bom Atendimento!' 
               : seller.status !== 'AVAILABLE'
                 ? 'Você está em pausa' 
@@ -148,7 +153,7 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
           </h2>
         </div>
 
-        {seller.status !== 'IN_SERVICE' && (
+        {!seller.activeClientName && (
           <button 
             onClick={onStartService}
             disabled={!isFirst || seller.status !== 'AVAILABLE'}
@@ -188,7 +193,7 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
         </section>
 
         <div className="grid grid-cols-2 gap-4">
-          <StatusSummary icon="groups" title="Em Atendimento" count={inService.length} sellers={inService} color="text-blue-500" />
+          <StatusSummary icon="groups" title="Em Atendimento" count={activeServices.length} sellers={activeServices} color="text-blue-500" />
           <StatusSummary icon="coffee" title="Pausa / Almoço" count={onBreak.length} sellers={onBreak} color="text-orange-400" />
         </div>
       </main>
