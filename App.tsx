@@ -1,6 +1,5 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { MOCK_SELLERS } from './constants';
 import { Seller, SellerStatus, ServiceRecord } from './types';
 import { dbService } from './services/dbService';
 import AdminDashboard from './components/AdminDashboard';
@@ -14,28 +13,21 @@ const App: React.FC = () => {
   const [activeService, setActiveService] = useState<ServiceRecord | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // No mundo real, aqui pegaríamos o ID do vendedor logado
   const [currentSellerId, setCurrentSellerId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      let dbSellers = await dbService.getSellers();
-      
-      // Se o banco estiver vazio, faz o setup inicial automático
-      if (dbSellers.length === 0) {
-        console.log("Banco vazio, inicializando tabelas e dados...");
-        await dbService.initDatabase();
-        await dbService.seedInitialData(MOCK_SELLERS);
-        dbSellers = await dbService.getSellers();
-      }
-      
+      // Apenas inicializa as tabelas se necessário, mas não insere dados fakes
+      await dbService.initDatabase();
+      const dbSellers = await dbService.getSellers();
       setSellers(dbSellers);
+      
       if (dbSellers.length > 0 && !currentSellerId) {
-        // Seleciona o primeiro vendedor como padrão para o preview
         setCurrentSellerId(dbSellers[0].id);
       }
+    } catch (error) {
+      console.error("Erro ao carregar dados:", error);
     } finally {
       setIsLoading(false);
     }
@@ -45,7 +37,7 @@ const App: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  const currentSeller = sellers.find(s => s.id === currentSellerId) || sellers[0];
+  const currentSeller = sellers.find(s => s.id === currentSellerId);
 
   const queue = sellers
     .filter(s => s.status === SellerStatus.AVAILABLE && s.queuePosition !== null && s.queuePosition !== undefined)
@@ -55,7 +47,7 @@ const App: React.FC = () => {
     setIsSaving(true);
     try {
       await dbService.updateSeller(id, { status: newStatus });
-      await loadData(); // Recarrega para garantir sincronia com o banco
+      await loadData();
     } finally {
       setIsSaving(false);
     }
@@ -105,12 +97,21 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSellerRegistered = async () => {
+    await loadData();
+  };
+
+  const handleSelectSeller = (id: string) => {
+    setCurrentSellerId(id);
+    setView('SELLER');
+  };
+
   if (isLoading && sellers.length === 0) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
         <div className="flex flex-col items-center gap-4">
           <div className="size-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-sm font-bold text-primary animate-pulse tracking-widest uppercase">Conectando ao Neon...</p>
+          <p className="text-sm font-bold text-primary animate-pulse tracking-widest uppercase">Acessando Neon...</p>
         </div>
       </div>
     );
@@ -127,7 +128,12 @@ const App: React.FC = () => {
       {view === 'ADMIN' && (
         <AdminDashboard 
           sellers={sellers} 
-          onNavigateToSeller={() => setView('SELLER')} 
+          onNavigateToSeller={() => {
+            if (sellers.length > 0) setView('SELLER');
+            else alert('Cadastre um vendedor primeiro!');
+          }}
+          onRefresh={loadData}
+          onSelectSeller={handleSelectSeller}
         />
       )}
       
