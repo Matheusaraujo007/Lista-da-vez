@@ -2,7 +2,7 @@
 import { neon } from '@neondatabase/serverless';
 import { Seller, SellerStatus, ServiceRecord } from '../types';
 
-// Usando a URL fornecida pelo usuário como fallback para o preview
+// Usando a URL fornecida pelo usuário
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_zFVtX8GByY1v@ep-divine-fog-ah845yt9-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require';
 const sql = neon(DATABASE_URL);
 
@@ -11,7 +11,6 @@ export const dbService = {
 
   async initDatabase() {
     try {
-      // Criar ENUM se não existir
       await sql`
         DO $$ BEGIN
           CREATE TYPE seller_status AS ENUM ('AVAILABLE', 'IN_SERVICE', 'BREAK', 'LUNCH', 'AWAY');
@@ -20,7 +19,6 @@ export const dbService = {
         END $$;
       `;
 
-      // Criar Tabela de Vendedores
       await sql`
         CREATE TABLE IF NOT EXISTS vendedores (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -33,7 +31,6 @@ export const dbService = {
         );
       `;
 
-      // Criar Tabela de Atendimentos
       await sql`
         CREATE TABLE IF NOT EXISTS atendimentos (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -72,15 +69,26 @@ export const dbService = {
     }
   },
 
-  async seedInitialData(sellers: Seller[]) {
+  async createSeller(name: string, avatar: string) {
     try {
-      for (const s of sellers) {
-        await sql`
-          INSERT INTO vendedores (nome, avatar_url, status, posicao_fila)
-          VALUES (${s.name}, ${s.avatar}, ${s.status}, ${s.queuePosition})
-          ON CONFLICT DO NOTHING
-        `;
-      }
+      // Pega a última posição para colocar o novo vendedor no fim da fila
+      const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
+      const nextPos = (maxPosRes[0].max || 0) + 1;
+      
+      await sql`
+        INSERT INTO vendedores (nome, avatar_url, status, posicao_fila)
+        VALUES (${name}, ${avatar}, 'AVAILABLE', ${nextPos})
+      `;
+      return { success: true };
+    } catch (e) {
+      console.error('Erro ao criar vendedor:', e);
+      return { success: false, error: e };
+    }
+  },
+
+  async deleteSeller(id: string) {
+    try {
+      await sql`DELETE FROM vendedores WHERE id = ${id}`;
       return { success: true };
     } catch (e) {
       return { success: false, error: e };
@@ -95,7 +103,6 @@ export const dbService = {
         RETURNING id;
       `;
       
-      // Se for finalização, atualiza o status do vendedor para disponível e joga pro fim da fila
       if (service.status === 'COMPLETED') {
         const maxPosRes = await sql`SELECT MAX(posicao_fila) as max FROM vendedores`;
         const nextPos = (maxPosRes[0].max || 0) + 1;
@@ -116,7 +123,7 @@ export const dbService = {
         const nextPos = (maxPosRes[0].max || 0) + 1;
         await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
       } else {
-        await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId}`;
+        await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId} `;
       }
       return { success: true };
     } catch (e) {
