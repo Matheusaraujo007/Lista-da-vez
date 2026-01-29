@@ -59,7 +59,6 @@ export const dbService = {
         );
       `;
 
-      // Migrações de segurança
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS valor_venda NUMERIC(15,2) DEFAULT 0`;
 
@@ -113,8 +112,6 @@ export const dbService = {
 
   async getSellers(): Promise<(Seller & { activeClientName?: string; activeServiceId?: string })[]> {
     try {
-      // Query corrigida: Usa subqueries para garantir 1 única linha por vendedor
-      // Isso evita que o vendedor apareça 3x se houver múltiplos registros de atendimento
       const rows = await sql`
         SELECT 
           v.id, 
@@ -146,19 +143,14 @@ export const dbService = {
         activeClientName: r.activeClientName || undefined,
         activeServiceId: r.activeServiceId || undefined
       }));
-    } catch (e) { 
-      console.error("Erro ao buscar vendedores:", e);
-      return []; 
-    }
+    } catch (e) { return []; }
   },
 
   async updateSeller(sellerId: string, data: any) {
     if (!sellerId) return { success: false };
-    
     if (data.nome || data.avatar_url) {
        await sql`UPDATE vendedores SET nome = COALESCE(${data.nome}, nome), avatar_url = COALESCE(${data.avatar_url}, avatar_url) WHERE id = ${sellerId}`;
     }
-
     if (data.status) {
       const isSystemActive = data.status === 'AVAILABLE' || data.status === 'IN_SERVICE' || data.status === 'BREAK' || data.status === 'LUNCH';
       if (!isSystemActive) {
@@ -181,7 +173,6 @@ export const dbService = {
   async saveService(service: Partial<ServiceRecord>) {
     try {
       const cleanWhatsapp = service.clientWhatsApp?.replace(/\D/g, '') || '';
-      
       if (cleanWhatsapp && service.clientName) {
         await sql`
           INSERT INTO clientes (nome, whatsapp, ultimo_vendedor_id, atualizado_em)
@@ -192,7 +183,6 @@ export const dbService = {
             atualizado_em = NOW();
         `;
       }
-
       if (service.id && service.status === 'COMPLETED') {
         await sql`
           UPDATE atendimentos SET 
@@ -204,7 +194,6 @@ export const dbService = {
             finalizado_em = NOW()
           WHERE id = ${service.id}
         `;
-        
         const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
         const nextPos = Number(maxPosRes[0].max || 0) + 1;
         await sql`UPDATE vendedores SET status = 'AVAILABLE', posicao_fila = ${nextPos}, ultimo_atendimento = NOW() WHERE id = ${service.sellerId}`;
@@ -217,9 +206,29 @@ export const dbService = {
         return { success: true, id: res[0].id };
       }
       return { success: true };
-    } catch (e: any) {
-      console.error("Erro ao salvar serviço:", e);
-      throw e;
+    } catch (e: any) { throw e; }
+  },
+
+  async getServiceHistory(sellerId?: string) {
+    try {
+      const query = sellerId 
+        ? sql`
+            SELECT a.*, v.nome as vendedor_nome, v.avatar_url as vendedor_avatar
+            FROM atendimentos a
+            JOIN vendedores v ON v.id = a.vendedor_id
+            WHERE a.vendedor_id = ${sellerId}
+            ORDER BY a.criado_em DESC
+          `
+        : sql`
+            SELECT a.*, v.nome as vendedor_nome, v.avatar_url as vendedor_avatar
+            FROM atendimentos a
+            JOIN vendedores v ON v.id = a.vendedor_id
+            ORDER BY a.criado_em DESC
+          `;
+      return query;
+    } catch (e) {
+      console.error("Erro ao buscar histórico:", e);
+      return [];
     }
   },
 
