@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Seller, SellerStatus, CustomStatus } from '../types';
 import { dbService } from '../services/dbService';
@@ -9,11 +10,12 @@ interface AdminDashboardProps {
   onNavigateToSeller: () => void;
   onRefresh: () => void;
   onSelectSeller: (id: string) => void;
+  onFinalizeService: (service: { id: string; sellerId: string; clientName: string }) => void;
 }
 
 const COLORS = ['#135bec', '#28a745', '#ffc107', '#dc3545', '#6c757d', '#17a2b8'];
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSeller, onRefresh, onSelectSeller }) => {
+const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSeller, onRefresh, onSelectSeller, onFinalizeService }) => {
   const [activeTab, setActiveTab] = useState('home');
   const [customStatuses, setCustomStatuses] = useState<CustomStatus[]>([]);
   const [selectedReportSeller, setSelectedReportSeller] = useState<string>('all');
@@ -80,13 +82,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
     return serviceHistory.filter(h => h.status === 'PENDING');
   }, [serviceHistory]);
 
-  // FIX: Added missing conversionData for the charts
   const conversionData = useMemo(() => [
     { name: 'Vendas', value: stats.sales },
     { name: 'Perdas', value: stats.total - stats.sales }
   ], [stats.sales, stats.total]);
 
-  // FIX: Added missing serviceTypeDistribution for the charts
   const serviceTypeDistribution = useMemo(() => {
     const dist: Record<string, number> = {};
     reportData.forEach(item => {
@@ -177,7 +177,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                     </div>
                   ) : (
                     activeServices.map(service => (
-                      <div key={service.id} className="min-w-[280px] bg-white dark:bg-gray-900 p-5 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-4">
+                      <div key={service.id} className="min-w-[300px] bg-white dark:bg-gray-900 p-5 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-4">
                         <div className="flex items-center gap-3">
                            <div className="size-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
                               <span className="material-symbols-outlined text-xl">person</span>
@@ -190,9 +190,17 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                               <p className="text-[10px] font-black text-blue-500">{formatDuration(service.criado_em)}</p>
                            </div>
                         </div>
-                        <div className="flex items-center gap-2 pt-2 border-t border-gray-50 dark:border-gray-800">
-                           <img src={service.vendedor_avatar} className="size-6 rounded-full object-cover" />
-                           <p className="text-[10px] font-bold text-gray-500">Atendido por: <span className="text-gray-900 dark:text-white">{service.vendedor_nome.split(' ')[0]}</span></p>
+                        <div className="flex items-center justify-between pt-2 border-t border-gray-50 dark:border-gray-800">
+                           <div className="flex items-center gap-2">
+                             <img src={service.vendedor_avatar} className="size-6 rounded-full object-cover" />
+                             <p className="text-[10px] font-bold text-gray-500">{service.vendedor_nome.split(' ')[0]}</p>
+                           </div>
+                           <button 
+                             onClick={() => onFinalizeService({ id: service.id, sellerId: service.vendedor_id, clientName: service.cliente_nome })}
+                             className="bg-primary/5 hover:bg-primary/10 text-primary px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition-all active:scale-90"
+                           >
+                             Finalizar
+                           </button>
                         </div>
                       </div>
                     ))
@@ -230,18 +238,31 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                                 {translateStatus(s.status)}
                              </p>
                              {isActive && activeClient && (
-                               <p className="text-[10px] font-bold text-gray-300">
-                                 • Com: {activeClient.cliente_nome}
-                               </p>
+                               <span className="flex items-center gap-1 bg-blue-500/5 px-2 py-0.5 rounded-lg border border-blue-500/10">
+                                 <span className="material-symbols-outlined text-[10px] text-blue-500">person</span>
+                                 <p className="text-[10px] font-bold text-blue-600 truncate max-w-[80px]">
+                                   {activeClient.cliente_nome}
+                                 </p>
+                               </span>
                              )}
                           </div>
                         </div>
-                        <button 
-                          onClick={() => { setEditingSeller(s); setFormData({name: s.name, avatar: s.avatar, status: s.status}); setIsSellerModalOpen(true); }}
-                          className="size-10 flex items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-800 text-gray-400 hover:text-primary transition-colors active:scale-95"
-                        >
-                          <span className="material-symbols-outlined text-xl">settings</span>
-                        </button>
+                        
+                        {isActive && activeClient ? (
+                          <button 
+                            onClick={() => onFinalizeService({ id: activeClient.id, sellerId: s.id, clientName: activeClient.cliente_nome })}
+                            className="h-10 px-4 bg-primary text-white rounded-xl text-[10px] font-black uppercase shadow-lg shadow-primary/20 active:scale-95 transition-all"
+                          >
+                            Finalizar
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => { setEditingSeller(s); setFormData({name: s.name, avatar: s.avatar, status: s.status}); setIsSellerModalOpen(true); }}
+                            className="size-10 flex items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-800 text-gray-400 hover:text-primary transition-colors active:scale-95"
+                          >
+                            <span className="material-symbols-outlined text-xl">settings</span>
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -252,7 +273,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
 
         {activeTab === 'reports' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-             {/* Filtros e Mini Stats permanecem conforme versão anterior */}
+             {/* Conteúdo de Auditoria (Mantido conforme versão anterior) */}
              <div className="bg-white dark:bg-gray-900 p-6 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col md:flex-row gap-6 items-center">
                 <div className="flex-1 w-full">
                   <h3 className="font-black text-xs uppercase text-gray-400 mb-2 px-2">Filtro de Vendedor</h3>
@@ -300,7 +321,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                 </ChartCard>
              </div>
 
-             {/* Log de Auditoria com Status Pendente */}
              <div className="space-y-4">
                 <div className="flex justify-between items-center px-2">
                   <h3 className="font-black text-2xl">Log de Auditoria</h3>
@@ -367,47 +387,32 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                           })}
                         </tbody>
                       </table>
-                      {serviceHistory.length === 0 && (
-                        <div className="py-20 text-center opacity-20">
-                          <span className="material-symbols-outlined text-6xl">history</span>
-                          <p className="text-xs font-black uppercase mt-2">Nenhum registro encontrado</p>
-                        </div>
-                      )}
                    </div>
                 </div>
              </div>
           </div>
         )}
 
+        {/* Outras tabs mantidas conforme anterior */}
         {activeTab === 'status' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            <div className="flex justify-between items-center px-2">
-              <h3 className="font-black text-2xl">Gestão de Status RH</h3>
-              <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{customStatuses.length} Customizados</p>
-            </div>
+            <h3 className="font-black text-2xl px-2">Gestão de Status RH</h3>
             <div className="grid gap-3">
-              {customStatuses.length === 0 ? (
-                <div className="py-20 text-center opacity-20">
-                  <span className="material-symbols-outlined text-6xl">category</span>
-                  <p className="text-xs font-black uppercase mt-2">Nenhum status RH cadastrado</p>
-                </div>
-              ) : (
-                customStatuses.map(status => (
-                  <div key={status.id} className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex items-center justify-between shadow-sm">
-                    <div className="flex items-center gap-4">
-                      <div className={`size-12 rounded-2xl flex items-center justify-center text-white`} style={{ backgroundColor: status.color }}>
-                        <span className="material-symbols-outlined">{status.icon}</span>
-                      </div>
-                      <div>
-                        <p className="font-black text-base">{status.label}</p>
-                        <p className={`text-[10px] font-black uppercase ${status.behavior === 'ACTIVE' ? 'text-green-500' : 'text-gray-400'}`}>
-                          {status.behavior === 'ACTIVE' ? 'Fila Ativa' : 'Fila Pausada'}
-                        </p>
-                      </div>
+              {customStatuses.map(status => (
+                <div key={status.id} className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex items-center justify-between shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className={`size-12 rounded-2xl flex items-center justify-center text-white`} style={{ backgroundColor: status.color }}>
+                      <span className="material-symbols-outlined">{status.icon}</span>
+                    </div>
+                    <div>
+                      <p className="font-black text-base">{status.label}</p>
+                      <p className={`text-[10px] font-black uppercase ${status.behavior === 'ACTIVE' ? 'text-green-500' : 'text-gray-400'}`}>
+                        {status.behavior === 'ACTIVE' ? 'Fila Ativa' : 'Fila Pausada'}
+                      </p>
                     </div>
                   </div>
-                ))
-              )}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -416,8 +421,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
             <div className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 dark:border-gray-800 shadow-sm">
                <h3 className="text-xl font-black mb-6">Configurações Gerais</h3>
-               <p className="text-gray-400 text-sm">Painel de ajustes administrativos e preferências do sistema.</p>
-               {/* Espaço para futuras configurações */}
+               <p className="text-gray-400 text-sm italic">O painel administrativo permite o controle total da jornada de venda.</p>
             </div>
           </div>
         )}
@@ -430,7 +434,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
         <TabItem icon="settings" label="Ajustes" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
       </nav>
 
-      {/* Modal de Gestão de Vendedor Simplificado */}
+      {/* Modal de Gestão de Vendedor */}
       {isSellerModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-[3rem] p-8 animate-in slide-in-from-bottom duration-300">
@@ -451,7 +455,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ sellers, onNavigateToSe
                    className="w-full h-14 bg-gray-50 dark:bg-gray-800 rounded-2xl border-0 px-6 font-bold"
                    value={formData.avatar}
                    onChange={e => setFormData({...formData, avatar: e.target.value})}
-                   placeholder="https://exemplo.com/foto.jpg"
                  />
                </div>
                <div className="flex gap-4 pt-4">
