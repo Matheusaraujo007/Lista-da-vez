@@ -37,11 +37,17 @@ const App: React.FC = () => {
       const dbSellers = await dbService.getSellers();
       setSellers(dbSellers);
       
-      // Manter o activeService sincronizado caso o vendedor mude de aba ou recarregue
+      // Sincroniza o atendimento ativo do vendedor atual
       if (currentSellerId) {
         const current = dbSellers.find(s => s.id === currentSellerId);
         if (current?.activeServiceId) {
-           setActiveService({ id: current.activeServiceId, sellerId: current.id, clientName: current.activeClientName });
+           setActiveService({ 
+             id: current.activeServiceId, 
+             sellerId: current.id, 
+             clientName: current.activeClientName 
+           });
+        } else {
+           setActiveService(null);
         }
       }
 
@@ -137,15 +143,27 @@ const App: React.FC = () => {
       {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={loadData} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
       {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onFinalizeService={() => setView('FINALIZE_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
       {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal} onCancel={() => setView(isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
-      {view === 'FINALIZE_SERVICE' && <FinalizeService onConfirm={async (data) => {
-        if (!activeService?.id || !currentSellerId) return;
-        setIsSaving(true);
-        await dbService.saveService({...activeService, ...data, status: 'COMPLETED'});
-        await loadData();
-        setActiveService(null);
-        setView('SELLER');
-        setIsSaving(false);
-      }} onBack={() => setView('SELLER')} />}
+      
+      {view === 'FINALIZE_SERVICE' && (
+        <FinalizeService 
+          clientName={activeService?.clientName || 'Cliente'} 
+          onConfirm={async (data) => {
+            if (!activeService?.id || !currentSellerId) return;
+            setIsSaving(true);
+            try {
+              await dbService.saveService({...activeService, ...data, status: 'COMPLETED'});
+              await loadData();
+              setActiveService(null);
+              setView('SELLER');
+            } catch (e) {
+              alert('Erro ao finalizar. Verifique os dados.');
+            } finally {
+              setIsSaving(false);
+            }
+          }} 
+          onBack={() => setView('SELLER')} 
+        />
+      )}
     </div>
   );
 };
