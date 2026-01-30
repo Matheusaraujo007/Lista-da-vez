@@ -14,17 +14,18 @@ const StartService: React.FC<StartServiceProps> = ({ seller, isFiscal, onCancel,
   const [name, setName] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [type, setType] = useState('COMPRA');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
   const [recurringClient, setRecurringClient] = useState<{ nome: string; nome_vendedor: string } | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
 
+  // Busca por WhatsApp (Auto preenchimento clássico)
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
-      if (whatsapp.length >= 10) {
+      if (whatsapp.length >= 10 && !name) {
         setIsSearching(true);
         const client = await dbService.getClientByWhatsApp(whatsapp);
         if (client) {
-          // Fix: Type assertion to match the state definition { nome: string; nome_vendedor: string }
-          // This resolves the error: Argument of type 'Record<string, any>' is not assignable to parameter of type 'SetStateAction<{ nome: string; nome_vendedor: string; }>'.
           setRecurringClient(client as { nome: string; nome_vendedor: string });
           setName(client.nome);
         } else {
@@ -33,9 +34,34 @@ const StartService: React.FC<StartServiceProps> = ({ seller, isFiscal, onCancel,
         setIsSearching(false);
       }
     }, 600);
-
     return () => clearTimeout(delayDebounceFn);
-  }, [whatsapp]);
+  }, [whatsapp, name]);
+
+  // Busca/Filtro por Nome ou WhatsApp (Filtro de Cadastros)
+  useEffect(() => {
+    const search = async () => {
+      const term = name.length >= 2 ? name : (whatsapp.length >= 2 ? whatsapp : '');
+      if (term.length >= 2) {
+        setIsSearching(true);
+        const results = await dbService.searchClients(term);
+        setSearchResults(results);
+        setShowResults(results.length > 0);
+        setIsSearching(false);
+      } else {
+        setSearchResults([]);
+        setShowResults(false);
+      }
+    };
+    const timer = setTimeout(search, 300);
+    return () => clearTimeout(timer);
+  }, [name, whatsapp]);
+
+  const selectClient = (client: any) => {
+    setName(client.nome);
+    setWhatsapp(client.whatsapp);
+    setRecurringClient({ nome: client.nome, nome_vendedor: client.nome_vendedor });
+    setShowResults(false);
+  };
 
   const handleSubmit = () => {
     if (!name.trim()) return alert('Informe o nome do cliente para prosseguir.');
@@ -65,7 +91,7 @@ const StartService: React.FC<StartServiceProps> = ({ seller, isFiscal, onCancel,
           <div className="bg-blue-600 p-6 rounded-[2.5rem] text-white shadow-xl animate-in zoom-in duration-300 flex items-center gap-4 border-4 border-white/20">
              <div className="size-12 bg-white/20 rounded-2xl flex items-center justify-center"><span className="material-symbols-outlined text-3xl">star</span></div>
              <div>
-               <p className="font-black text-xs uppercase tracking-widest opacity-80">Cliente Recorrente!</p>
+               <p className="font-black text-xs uppercase tracking-widest opacity-80">Já é nosso cliente!</p>
                <p className="font-black text-base">Vendedor preferencial: <span className="underline">{recurringClient.nome_vendedor || 'Não informado'}</span></p>
              </div>
           </div>
@@ -80,8 +106,50 @@ const StartService: React.FC<StartServiceProps> = ({ seller, isFiscal, onCancel,
           </div>
         </div>
 
-        {/* Formulário */}
-        <div className="space-y-6">
+        {/* Formulário com Filtro */}
+        <div className="space-y-6 relative">
+          <div className="space-y-2.5 relative">
+            <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Nome do Cliente</label>
+            <div className="relative">
+              <span className="material-symbols-outlined absolute left-6 top-1/2 -translate-y-1/2 text-gray-300">person</span>
+              <input 
+                value={name} 
+                onChange={e => setName(e.target.value)} 
+                onFocus={() => name.length >= 2 && setShowResults(true)}
+                className="w-full h-18 bg-white dark:bg-gray-900 border-0 rounded-[2rem] pl-16 pr-6 font-bold text-lg focus:ring-4 focus:ring-primary/10 transition-all shadow-sm" 
+                placeholder="Busque ou digite o nome..." 
+              />
+            </div>
+
+            {/* Dropdown de Filtro de Clientes */}
+            {showResults && (
+              <div className="absolute top-full left-0 right-0 z-[100] mt-2 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[2rem] shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                 <div className="p-3 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between">
+                    <p className="text-[9px] font-black uppercase text-gray-400 ml-3">Registros Encontrados</p>
+                    <button onClick={() => setShowResults(false)} className="material-symbols-outlined text-gray-400 text-sm">close</button>
+                 </div>
+                 <div className="max-h-60 overflow-y-auto">
+                    {searchResults.map(client => (
+                      <button 
+                        key={client.id} 
+                        onClick={() => selectClient(client)}
+                        className="w-full p-4 flex items-center gap-4 hover:bg-primary/5 transition-colors border-b border-gray-50 dark:border-gray-800 last:border-0 text-left"
+                      >
+                        <div className="size-10 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
+                          <span className="material-symbols-outlined text-lg">person_check</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-black text-sm">{client.nome}</p>
+                          <p className="text-[10px] font-bold text-gray-400">{client.whatsapp}</p>
+                        </div>
+                        <span className="material-symbols-outlined text-gray-300">arrow_forward_ios</span>
+                      </button>
+                    ))}
+                 </div>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2.5">
             <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">WhatsApp / Contato</label>
             <div className="relative">
@@ -96,19 +164,6 @@ const StartService: React.FC<StartServiceProps> = ({ seller, isFiscal, onCancel,
               {isSearching && <div className="absolute right-6 top-1/2 -translate-y-1/2 size-4 border-2 border-primary border-t-transparent animate-spin rounded-full"></div>}
             </div>
           </div>
-
-          <div className="space-y-2.5">
-            <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Nome do Cliente</label>
-            <div className="relative">
-              <span className="material-symbols-outlined absolute left-6 top-1/2 -translate-y-1/2 text-gray-300">person</span>
-              <input 
-                value={name} 
-                onChange={e => setName(e.target.value)} 
-                className="w-full h-18 bg-white dark:bg-gray-900 border-0 rounded-[2rem] pl-16 pr-6 font-bold text-lg focus:ring-4 focus:ring-primary/10 transition-all shadow-sm" 
-                placeholder="Ex: João da Silva" 
-              />
-            </div>
-          </div>
         </div>
 
         <div className="space-y-4">
@@ -118,6 +173,7 @@ const StartService: React.FC<StartServiceProps> = ({ seller, isFiscal, onCancel,
             <TypeChip label="Troca" icon="sync" active={type === 'TROCA'} onClick={() => setType('TROCA')} color="bg-purple-500" />
             <TypeChip label="Orçamento" icon="request_quote" active={type === 'ORCAMENTO'} onClick={() => setType('ORCAMENTO')} color="bg-green-500" />
             <TypeChip label="Dúvidas" icon="help_center" active={type === 'INFORMACAO'} onClick={() => setType('INFORMACAO')} color="bg-orange-500" />
+            <TypeChip label="Reativação" icon="restart_alt" active={type === 'REATIVACAO'} onClick={() => setType('REATIVACAO')} color="bg-pink-500" />
           </div>
         </div>
       </main>

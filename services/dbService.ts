@@ -40,6 +40,7 @@ export const dbService = {
           tipo_atendimento TEXT NOT NULL,
           venda_realizada BOOLEAN,
           valor_venda NUMERIC(15,2) DEFAULT 0,
+          itens_venda INTEGER DEFAULT 0,
           motivo_perda TEXT,
           observacoes TEXT,
           status TEXT DEFAULT 'PENDING',
@@ -61,6 +62,7 @@ export const dbService = {
 
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
       await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS valor_venda NUMERIC(15,2) DEFAULT 0`;
+      await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS itens_venda INTEGER DEFAULT 0`;
       
       await sql`ALTER TABLE atendimentos ALTER COLUMN venda_realizada DROP NOT NULL`;
 
@@ -84,6 +86,21 @@ export const dbService = {
       `;
       return res[0] || null;
     } catch (e) { return null; }
+  },
+
+  async searchClients(query: string) {
+    if (!query || query.length < 2) return [];
+    const searchTerm = `%${query}%`;
+    try {
+      return await sql`
+        SELECT c.*, v.nome as nome_vendedor 
+        FROM clientes c
+        LEFT JOIN vendedores v ON v.id = c.ultimo_vendedor_id
+        WHERE c.nome ILIKE ${searchTerm} OR c.whatsapp ILIKE ${searchTerm}
+        ORDER BY c.atualizado_em DESC
+        LIMIT 5
+      `;
+    } catch (e) { return []; }
   },
 
   async getCustomStatuses(): Promise<CustomStatus[]> {
@@ -197,6 +214,7 @@ export const dbService = {
           UPDATE atendimentos SET 
             venda_realizada = ${service.isSale || false},
             valor_venda = ${service.saleValue || 0},
+            itens_venda = ${service.itemsCount || 0},
             motivo_perda = ${service.lossReason || null},
             observacoes = ${service.observations || null},
             status = 'COMPLETED',
@@ -250,7 +268,7 @@ export const dbService = {
 
   async getAdvancedStats(sellerId?: string) {
     return sellerId 
-      ? sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda, status FROM atendimentos WHERE vendedor_id = ${sellerId}` 
-      : sql`SELECT tipo_atendimento, venda_realizada, valor_venda, motivo_perda, status FROM atendimentos`;
+      ? sql`SELECT vendedor_id, tipo_atendimento, venda_realizada, valor_venda, itens_venda, motivo_perda, status FROM atendimentos WHERE vendedor_id = ${sellerId}` 
+      : sql`SELECT vendedor_id, tipo_atendimento, venda_realizada, valor_venda, itens_venda, motivo_perda, status FROM atendimentos`;
   }
 };

@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Seller, SellerStatus } from '../types';
+import { getPAEmoji, getTicketEmoji } from './AdminDashboard';
 
 interface SellerPanelProps {
   seller: Seller & { activeClientName?: string; activeServiceId?: string; activeServiceStart?: string };
   queue: Seller[];
   allSellers: (Seller & { activeClientName?: string; activeServiceId?: string; activeServiceStart?: string })[];
+  reportData?: any[];
   onStartService: () => void;
   onFinalizeService: () => void;
   onNavigateToAdmin: () => void;
@@ -16,6 +18,7 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
   seller, 
   queue, 
   allSellers, 
+  reportData = [],
   onStartService, 
   onFinalizeService,
   onNavigateToAdmin,
@@ -38,13 +41,27 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
   };
 
   const isFirst = queue[0]?.id === seller.id;
-  
-  // FIX: Filtra por vendedores que realmente possuem um cliente ativo no banco de dados
-  const activeServices = useMemo(() => {
-    return allSellers.filter(s => s.activeClientName);
-  }, [allSellers]);
-
+  const activeServices = useMemo(() => allSellers.filter(s => s.activeClientName), [allSellers]);
   const onBreak = allSellers.filter(s => s.status === 'BREAK' || s.status === 'LUNCH');
+
+  // Performance Pessoal do Dia
+  const myStats = useMemo(() => {
+    const records = reportData.filter(r => r.vendedor_id === seller.id && r.venda_realizada !== null);
+    const sales = records.filter(r => r.venda_realizada).length;
+    const revenue = records.reduce((acc, curr) => acc + Number(curr.valor_venda || 0), 0);
+    const items = records.reduce((acc, curr) => acc + Number(curr.itens_venda || 0), 0);
+    
+    const paVal = sales > 0 ? (items / sales).toFixed(2) : "0.00";
+    const ticketStr = sales > 0 ? (revenue / sales).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0,00";
+    
+    return {
+      sales,
+      pa: paVal,
+      ticket: ticketStr,
+      paEmoji: getPAEmoji(paVal),
+      ticketEmoji: getTicketEmoji(ticketStr)
+    };
+  }, [reportData, seller.id]);
 
   return (
     <div className="min-h-screen bg-background-light dark:bg-background-dark pb-32">
@@ -69,6 +86,24 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
       </header>
 
       <main className="p-4 space-y-6">
+        {/* Performance Hoje (Nova Seção) */}
+        <div className="grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-right duration-500">
+           <div className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex flex-col items-center shadow-sm">
+              <p className="text-[8px] font-black uppercase text-gray-400 tracking-widest mb-1">Meu P.A. Hoje</p>
+              <div className="flex items-center gap-2">
+                 <span className="text-xl font-black text-pink-500">{myStats.pa}</span>
+                 <span className="text-xl">{myStats.paEmoji}</span>
+              </div>
+           </div>
+           <div className="bg-white dark:bg-gray-900 p-4 rounded-3xl border border-gray-100 dark:border-gray-800 flex flex-col items-center shadow-sm">
+              <p className="text-[8px] font-black uppercase text-gray-400 tracking-widest mb-1">Meu Ticket Médio</p>
+              <div className="flex items-center gap-2">
+                 <span className="text-sm font-black text-primary">R$ {myStats.ticket}</span>
+                 <span className="text-xl">{myStats.ticketEmoji}</span>
+              </div>
+           </div>
+        </div>
+
         {seller.activeClientName && (
           <div className="bg-primary p-6 rounded-[2.5rem] text-white shadow-2xl animate-in slide-in-from-top duration-500 border-b-8 border-primary-dark">
              <div className="flex items-center justify-between gap-4">
@@ -91,54 +126,6 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
              </div>
           </div>
         )}
-
-        {/* Monitoramento da Loja (Em Atendimento Agora) */}
-        <div className="space-y-4">
-           <div className="flex justify-between items-center px-2">
-              <h3 className="font-black text-lg">Em Atendimento Agora</h3>
-              <span className="flex items-center gap-1.5 bg-blue-500/10 text-blue-500 px-3 py-1 rounded-full text-[9px] font-black uppercase">
-                {activeServices.length} mesas
-              </span>
-           </div>
-           <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
-              {activeServices.length === 0 ? (
-                <div className="w-full bg-white dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 p-8 rounded-[2rem] text-center opacity-40">
-                   <p className="text-[10px] font-black uppercase tracking-widest">Nenhum atendimento ativo</p>
-                </div>
-              ) : (
-                activeServices.map(s => (
-                  <div key={s.id} className="min-w-[260px] bg-white dark:bg-gray-900 p-4 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col gap-3">
-                    <div className="flex items-center gap-3">
-                       <div className="size-8 bg-primary/10 text-primary rounded-xl flex items-center justify-center">
-                          <span className="material-symbols-outlined text-lg">person</span>
-                       </div>
-                       <div className="flex-1 overflow-hidden">
-                          <p className="text-[8px] font-black uppercase text-gray-400">Cliente</p>
-                          <p className="font-black text-sm leading-tight truncate">{s.activeClientName}</p>
-                       </div>
-                       <div className="text-right">
-                          <p className="text-[9px] font-black text-blue-500">{formatDuration(s.activeServiceStart)}</p>
-                       </div>
-                    </div>
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-50 dark:border-gray-800">
-                       <div className="flex items-center gap-2">
-                         <img src={s.avatar} className="size-6 rounded-full object-cover" />
-                         <p className="text-[9px] font-bold text-gray-500">{s.id === seller.id ? 'Você' : s.name.split(' ')[0]}</p>
-                       </div>
-                       {s.id === seller.id && (
-                         <button 
-                           onClick={onFinalizeService}
-                           className="bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1 rounded-lg text-[8px] font-black uppercase transition-all"
-                         >
-                           Finalizar
-                         </button>
-                       )}
-                    </div>
-                  </div>
-                ))
-              )}
-           </div>
-        </div>
 
         <div className="text-center py-4">
           <h4 className="text-primary text-xs font-bold uppercase tracking-widest mb-1">Fila de Atendimento</h4>
@@ -191,11 +178,6 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
             ))}
           </div>
         </section>
-
-        <div className="grid grid-cols-2 gap-4">
-          <StatusSummary icon="groups" title="Em Atendimento" count={activeServices.length} sellers={activeServices} color="text-blue-500" />
-          <StatusSummary icon="coffee" title="Pausa / Almoço" count={onBreak.length} sellers={onBreak} color="text-orange-400" />
-        </div>
       </main>
 
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[92%] max-w-md bg-white dark:bg-gray-900 shadow-2xl rounded-3xl border border-gray-100 dark:border-gray-800 p-2 flex justify-between items-center z-50">
@@ -207,20 +189,6 @@ const SellerPanel: React.FC<SellerPanelProps> = ({
     </div>
   );
 };
-
-const StatusSummary: React.FC<{ icon: string; title: string; count: number; sellers: Seller[]; color: string }> = ({ icon, title, count, sellers, color }) => (
-  <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-800">
-    <div className="flex items-center gap-2 mb-3">
-      <span className={`material-symbols-outlined ${color} text-lg`}>{icon}</span>
-      <h4 className="text-sm font-bold leading-tight">{title}</h4>
-    </div>
-    <div className="flex -space-x-2 overflow-hidden">
-      {sellers.slice(0, 3).map(s => (
-        <img key={s.id} src={s.avatar} alt="" className="size-8 rounded-full ring-2 ring-white dark:ring-gray-900 object-cover" />
-      ))}
-    </div>
-  </div>
-);
 
 const StatusAction: React.FC<{ icon: string; label: string; active?: boolean; onClick: () => void }> = ({ icon, label, active, onClick }) => (
   <button 

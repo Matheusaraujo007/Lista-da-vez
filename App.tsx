@@ -12,6 +12,7 @@ import FiscalPanel from './components/FiscalPanel';
 const App: React.FC = () => {
   const [view, setView] = useState<'LOGIN' | 'ADMIN' | 'SELLER' | 'FISCAL' | 'START_SERVICE' | 'FINALIZE_SERVICE'>('LOGIN');
   const [sellers, setSellers] = useState<(Seller & { activeClientName?: string, activeServiceId?: string, activeServiceStart?: string })[]>([]);
+  const [reportData, setReportData] = useState<any[]>([]);
   const [activeService, setActiveService] = useState<Partial<ServiceRecord> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,8 +35,13 @@ const App: React.FC = () => {
     if (showLoading) setIsLoading(true);
     try {
       await dbService.initDatabase();
-      const dbSellers = await dbService.getSellers();
+      const [dbSellers, stats] = await Promise.all([
+        dbService.getSellers(),
+        dbService.getAdvancedStats()
+      ]);
+      
       setSellers(dbSellers);
+      setReportData(stats);
       
       if (currentSellerId && !isAdmin) {
         const current = dbSellers.find(s => s.id === currentSellerId);
@@ -51,7 +57,6 @@ const App: React.FC = () => {
         }
       }
 
-      // Define a visão inicial apenas no primeiro carregamento
       if (showLoading) {
         if (isAdmin) setView('ADMIN');
         else if (isFiscal) setView('FISCAL');
@@ -65,10 +70,9 @@ const App: React.FC = () => {
     }
   }, [currentSellerId, isAdmin, isFiscal]);
 
-  // Polling para manter a lista atualizada para todos
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => loadData(false), 10000); // Atualiza a cada 10s
+    const interval = setInterval(() => loadData(false), 10000);
     return () => clearInterval(interval);
   }, [loadData]);
 
@@ -147,6 +151,7 @@ const App: React.FC = () => {
       {view === 'ADMIN' && (
         <AdminDashboard 
           sellers={sellers} 
+          reportDataProp={reportData}
           onNavigateToSeller={handleLogout} 
           onRefresh={() => loadData(false)} 
           onSelectSeller={(id) => { setCurrentSellerId(id); setView('SELLER'); }} 
@@ -156,8 +161,29 @@ const App: React.FC = () => {
           }}
         />
       )}
-      {view === 'FISCAL' && <FiscalPanel sellers={sellers} queue={queue} onLogout={handleLogout} onRefresh={() => loadData(false)} onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} onUpdateStatus={updateSellerStatus} />}
-      {view === 'SELLER' && currentSeller && <SellerPanel seller={currentSeller} queue={queue} allSellers={sellers} onStartService={() => setView('START_SERVICE')} onFinalizeService={() => setView('FINALIZE_SERVICE')} onNavigateToAdmin={handleLogout} onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} />}
+      {view === 'FISCAL' && (
+        <FiscalPanel 
+          sellers={sellers} 
+          queue={queue} 
+          reportData={reportData}
+          onLogout={handleLogout} 
+          onRefresh={() => loadData(false)} 
+          onAssignClient={(sellerId) => { setCurrentSellerId(sellerId); setView('START_SERVICE'); }} 
+          onUpdateStatus={updateSellerStatus} 
+        />
+      )}
+      {view === 'SELLER' && currentSeller && (
+        <SellerPanel 
+          seller={currentSeller} 
+          queue={queue} 
+          allSellers={sellers} 
+          reportData={reportData}
+          onStartService={() => setView('START_SERVICE')} 
+          onFinalizeService={() => setView('FINALIZE_SERVICE')} 
+          onNavigateToAdmin={handleLogout} 
+          onUpdateStatus={(status) => updateSellerStatus(currentSeller.id, status)} 
+        />
+      )}
       {view === 'START_SERVICE' && <StartService seller={sellers.find(s => s.id === currentSellerId)!} isFiscal={isFiscal || isAdmin} onCancel={() => setView(isAdmin ? 'ADMIN' : isFiscal ? 'FISCAL' : 'SELLER')} onConfirm={handleStartService} />}
       
       {view === 'FINALIZE_SERVICE' && (

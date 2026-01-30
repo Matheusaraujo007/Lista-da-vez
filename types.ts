@@ -31,10 +31,11 @@ export interface ServiceRecord {
   sellerId: string;
   clientName: string;
   clientWhatsApp: string;
-  serviceType: 'COMPRA' | 'TROCA' | 'ORCAMENTO' | 'INFORMACAO';
+  serviceType: 'COMPRA' | 'TROCA' | 'ORCAMENTO' | 'INFORMACAO' | 'REATIVACAO';
   status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
   isSale: boolean;
   saleValue?: number; // Valor da venda em Reais
+  itemsCount?: number; // Quantidade de peças (P.A.)
   lossReason?: string;
   observations?: string;
   createdAt: string;

@@ -3,25 +3,28 @@ import React, { useState } from 'react';
 
 interface FinalizeServiceProps {
   clientName: string;
-  onConfirm: (data: { isSale: boolean; saleValue?: number; lossReason?: string; observations?: string }) => void;
+  onConfirm: (data: { isSale: boolean; saleValue?: number; itemsCount?: number; lossReason?: string; observations?: string }) => void;
   onBack: () => void;
 }
 
 const FinalizeService: React.FC<FinalizeServiceProps> = ({ clientName, onConfirm, onBack }) => {
   const [isSale, setIsSale] = useState(true);
   const [saleValue, setSaleValue] = useState<string>('');
+  const [itemsCount, setItemsCount] = useState<string>('');
   const [reason, setReason] = useState('');
   const [observations, setObservations] = useState('');
 
   const handleSubmit = () => {
-    if (isSale && (!saleValue || parseFloat(saleValue) <= 0)) {
-      return alert('Por favor, informe o valor da compra.');
+    if (isSale) {
+      if (!saleValue || parseFloat(saleValue) <= 0) return alert('Por favor, informe o valor da compra.');
+      if (!itemsCount || parseInt(itemsCount) <= 0) return alert('Por favor, informe a quantidade de peças vendidas.');
     }
     if (!isSale && !reason) return alert('Por favor, selecione o motivo da não venda.');
     
     onConfirm({ 
       isSale, 
       saleValue: isSale ? parseFloat(saleValue) : 0, 
+      itemsCount: isSale ? parseInt(itemsCount) : 0,
       lossReason: isSale ? undefined : reason, 
       observations 
     });
@@ -73,19 +76,35 @@ const FinalizeService: React.FC<FinalizeServiceProps> = ({ clientName, onConfirm
 
         <div className="space-y-6">
           {isSale ? (
-            <div className="space-y-2.5 animate-in zoom-in duration-300">
-              <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Valor da Venda (R$)</label>
-              <div className="relative">
-                <span className="absolute left-8 top-1/2 -translate-y-1/2 font-black text-2xl text-green-500">R$</span>
-                <input 
-                  autoFocus
-                  type="number" 
-                  step="0.01"
-                  placeholder="0,00" 
-                  value={saleValue} 
-                  onChange={e => setSaleValue(e.target.value)} 
-                  className="w-full h-24 bg-white dark:bg-gray-900 border-0 rounded-[2.5rem] pl-20 pr-8 font-black text-5xl focus:ring-4 focus:ring-green-500/10 transition-all shadow-sm" 
-                />
+            <div className="space-y-6 animate-in zoom-in duration-300">
+              <div className="space-y-2.5">
+                <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Valor da Venda (R$)</label>
+                <div className="relative">
+                  <span className="absolute left-8 top-1/2 -translate-y-1/2 font-black text-2xl text-green-500">R$</span>
+                  <input 
+                    autoFocus
+                    type="number" 
+                    step="0.01"
+                    placeholder="0,00" 
+                    value={saleValue} 
+                    onChange={e => setSaleValue(e.target.value)} 
+                    className="w-full h-20 bg-white dark:bg-gray-900 border-0 rounded-[2.5rem] pl-20 pr-8 font-black text-4xl focus:ring-4 focus:ring-green-500/10 transition-all shadow-sm" 
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                <label className="text-[11px] font-black uppercase text-gray-400 ml-4 tracking-[0.1em]">Quantidade de Peças (P.A.)</label>
+                <div className="relative">
+                  <span className="material-symbols-outlined absolute left-8 top-1/2 -translate-y-1/2 text-primary">inventory_2</span>
+                  <input 
+                    type="number" 
+                    placeholder="Ex: 2" 
+                    value={itemsCount} 
+                    onChange={e => setItemsCount(e.target.value)} 
+                    className="w-full h-20 bg-white dark:bg-gray-900 border-0 rounded-[2.5rem] pl-20 pr-8 font-black text-3xl focus:ring-4 focus:ring-primary/10 transition-all shadow-sm" 
+                  />
+                </div>
               </div>
             </div>
           ) : (
