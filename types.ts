@@ -17,6 +17,14 @@ export interface CustomStatus {
   behavior: 'INACTIVE' | 'ACTIVE';
 }
 
+export interface StoreGoals {
+  id?: string;
+  faturamento: number;
+  pa: number;
+  ticket_medio: number;
+  conversao: number;
+}
+
 export interface Seller {
   id: string;
   name: string;
@@ -24,6 +32,14 @@ export interface Seller {
   status: SellerStatus | string;
   lastServiceAt?: string;
   queuePosition?: number;
+  meta_faturamento?: number;
+  meta_pa?: number;
+  meta_ticket?: number;
+  meta_conversao?: number;
+  // Added optional properties to track the active service state directly on the seller object
+  activeClientName?: string;
+  activeServiceId?: string;
+  activeServiceStart?: string;
 }
 
 export interface ServiceRecord {
@@ -34,8 +50,8 @@ export interface ServiceRecord {
   serviceType: 'COMPRA' | 'TROCA' | 'ORCAMENTO' | 'INFORMACAO' | 'REATIVACAO';
   status: 'PENDING' | 'COMPLETED' | 'CANCELLED';
   isSale: boolean;
-  saleValue?: number; // Valor da venda em Reais
-  itemsCount?: number; // Quantidade de peças (P.A.)
+  saleValue?: number;
+  itemsCount?: number;
   lossReason?: string;
   observations?: string;
   createdAt: string;

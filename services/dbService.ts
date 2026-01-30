@@ -1,6 +1,6 @@
 
 import { neon } from '@neondatabase/serverless';
-import { Seller, SellerStatus, ServiceRecord, CustomStatus } from '../types';
+import { Seller, SellerStatus, ServiceRecord, CustomStatus, StoreGoals } from '../types';
 
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_zFVtX8GByY1v@ep-divine-fog-ah845yt9-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require';
 const sql = neon(DATABASE_URL);
@@ -16,9 +16,19 @@ export const dbService = {
           status TEXT DEFAULT 'AVAILABLE',
           posicao_fila INTEGER,
           ultimo_atendimento TIMESTAMPTZ,
+          meta_faturamento NUMERIC(15,2),
+          meta_pa NUMERIC(5,2),
+          meta_ticket NUMERIC(15,2),
+          meta_conversao NUMERIC(5,2),
           criado_em TIMESTAMPTZ DEFAULT NOW()
         );
       `;
+
+      // Atualizações de colunas se já existirem
+      await sql`ALTER TABLE vendedores ADD COLUMN IF NOT EXISTS meta_faturamento NUMERIC(15,2)`;
+      await sql`ALTER TABLE vendedores ADD COLUMN IF NOT EXISTS meta_pa NUMERIC(5,2)`;
+      await sql`ALTER TABLE vendedores ADD COLUMN IF NOT EXISTS meta_ticket NUMERIC(15,2)`;
+      await sql`ALTER TABLE vendedores ADD COLUMN IF NOT EXISTS meta_conversao NUMERIC(5,2)`;
 
       await sql`
         CREATE TABLE IF NOT EXISTS clientes (
@@ -60,17 +70,140 @@ export const dbService = {
         );
       `;
 
-      await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'PENDING'`;
-      await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS valor_venda NUMERIC(15,2) DEFAULT 0`;
-      await sql`ALTER TABLE atendimentos ADD COLUMN IF NOT EXISTS itens_venda INTEGER DEFAULT 0`;
-      
-      await sql`ALTER TABLE atendimentos ALTER COLUMN venda_realizada DROP NOT NULL`;
+      await sql`
+        CREATE TABLE IF NOT EXISTS loja_metas (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          faturamento NUMERIC(15,2) DEFAULT 5000,
+          pa NUMERIC(5,2) DEFAULT 2.0,
+          ticket_medio NUMERIC(15,2) DEFAULT 350,
+          conversao NUMERIC(5,2) DEFAULT 40,
+          atualizado_em TIMESTAMPTZ DEFAULT NOW()
+        );
+      `;
+
+      const goalsCount = await sql`SELECT count(*) FROM loja_metas`;
+      if (parseInt(goalsCount[0].count) === 0) {
+        await sql`INSERT INTO loja_metas (faturamento, pa, ticket_medio, conversao) VALUES (5000, 2.0, 350, 40)`;
+      }
 
       return { success: true };
     } catch (error: any) {
       console.error('Erro ao inicializar banco:', error);
       return { success: false, message: error.message };
     }
+  },
+
+  async getStoreGoals(): Promise<StoreGoals> {
+    const res = await sql`SELECT * FROM loja_metas LIMIT 1`;
+    return {
+      faturamento: Number(res[0].faturamento),
+      pa: Number(res[0].pa),
+      ticket_medio: Number(res[0].ticket_medio),
+      conversao: Number(res[0].conversao)
+    };
+  },
+
+  async updateStoreGoals(goals: StoreGoals) {
+    await sql`
+      UPDATE loja_metas SET 
+        faturamento = ${goals.faturamento},
+        pa = ${goals.pa},
+        ticket_medio = ${goals.ticket_medio},
+        conversao = ${goals.conversao},
+        atualizado_em = NOW()
+    `;
+    return { success: true };
+  },
+
+  async getSellers(): Promise<Seller[]> {
+    try {
+      const rows = await sql`
+        SELECT 
+          id, 
+          nome as name, 
+          avatar_url as avatar, 
+          status, 
+          posicao_fila as "queuePosition",
+          meta_faturamento,
+          meta_pa,
+          meta_ticket,
+          meta_conversao,
+          (
+            SELECT a.cliente_nome 
+            FROM atendimentos a 
+            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
+            ORDER BY a.criado_em DESC LIMIT 1
+          ) as "activeClientName",
+          (
+            SELECT a.id 
+            FROM atendimentos a 
+            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
+            ORDER BY a.criado_em DESC LIMIT 1
+          ) as "activeServiceId",
+          (
+            SELECT a.criado_em 
+            FROM atendimentos a 
+            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
+            ORDER BY a.criado_em DESC LIMIT 1
+          ) as "activeServiceStart"
+        FROM vendedores v 
+        ORDER BY v.posicao_fila ASC NULLS LAST, v.nome ASC
+      `;
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        avatar: r.avatar,
+        status: r.status,
+        queuePosition: r.queuePosition,
+        meta_faturamento: r.meta_faturamento ? Number(r.meta_faturamento) : undefined,
+        meta_pa: r.meta_pa ? Number(r.meta_pa) : undefined,
+        meta_ticket: r.meta_ticket ? Number(r.meta_ticket) : undefined,
+        meta_conversao: r.meta_conversao ? Number(r.meta_conversao) : undefined,
+        activeClientName: r.activeClientName || undefined,
+        activeServiceId: r.activeServiceId || undefined,
+        activeServiceStart: r.activeServiceStart || undefined
+      } as Seller));
+    } catch (e) { return []; }
+  },
+
+  async updateSeller(sellerId: string, data: any) {
+    if (!sellerId) return { success: false };
+    
+    await sql`
+      UPDATE vendedores SET 
+        nome = COALESCE(${data.nome}, nome), 
+        avatar_url = COALESCE(${data.avatar_url}, avatar_url),
+        meta_faturamento = ${data.meta_faturamento === undefined ? null : data.meta_faturamento},
+        meta_pa = ${data.meta_pa === undefined ? null : data.meta_pa},
+        meta_ticket = ${data.meta_ticket === undefined ? null : data.meta_ticket},
+        meta_conversao = ${data.meta_conversao === undefined ? null : data.meta_conversao}
+      WHERE id = ${sellerId}
+    `;
+
+    if (data.status) {
+      const isSystemActive = data.status === 'AVAILABLE' || data.status === 'IN_SERVICE' || data.status === 'BREAK' || data.status === 'LUNCH';
+      if (!isSystemActive) {
+        await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId}`;
+      } else {
+        const currentRes = await sql`SELECT posicao_fila FROM vendedores WHERE id = ${sellerId}`;
+        const current = currentRes[0];
+        if (current && current.posicao_fila === null && data.status === 'AVAILABLE') {
+           const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
+           const nextPos = Number(maxPosRes[0].max || 0) + 1;
+           await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
+        } else {
+           await sql`UPDATE vendedores SET status = ${data.status} WHERE id = ${sellerId}`;
+        }
+      }
+    }
+    return { success: true };
+  },
+
+  async createSeller(name: string, avatar: string) {
+    const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
+    const nextPos = Number(maxPosRes[0].max || 0) + 1;
+    await sql`INSERT INTO vendedores (nome, avatar_url, status, posicao_fila) VALUES (${name}, ${avatar}, 'AVAILABLE', ${nextPos})`;
+    return { success: true };
   },
 
   async getClientByWhatsApp(whatsapp: string) {
@@ -126,73 +259,6 @@ export const dbService = {
 
   async deleteCustomStatus(id: string) {
     await sql`DELETE FROM status_rh WHERE id = ${id}`;
-    return { success: true };
-  },
-
-  async getSellers(): Promise<(Seller & { activeClientName?: string; activeServiceId?: string; activeServiceStart?: string })[]> {
-    try {
-      const rows = await sql`
-        SELECT 
-          v.id, 
-          v.nome as name, 
-          v.avatar_url as avatar, 
-          v.status, 
-          v.posicao_fila as "queuePosition",
-          (
-            SELECT a.cliente_nome 
-            FROM atendimentos a 
-            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
-            ORDER BY a.criado_em DESC LIMIT 1
-          ) as "activeClientName",
-          (
-            SELECT a.id 
-            FROM atendimentos a 
-            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
-            ORDER BY a.criado_em DESC LIMIT 1
-          ) as "activeServiceId",
-          (
-            SELECT a.criado_em 
-            FROM atendimentos a 
-            WHERE a.vendedor_id = v.id AND a.status = 'PENDING' 
-            ORDER BY a.criado_em DESC LIMIT 1
-          ) as "activeServiceStart"
-        FROM vendedores v 
-        ORDER BY v.posicao_fila ASC NULLS LAST, v.nome ASC
-      `;
-      return rows.map(r => ({
-        id: r.id,
-        name: r.name,
-        avatar: r.avatar,
-        status: r.status,
-        queuePosition: r.queuePosition,
-        activeClientName: r.activeClientName || undefined,
-        activeServiceId: r.activeServiceId || undefined,
-        activeServiceStart: r.activeServiceStart || undefined
-      }));
-    } catch (e) { return []; }
-  },
-
-  async updateSeller(sellerId: string, data: any) {
-    if (!sellerId) return { success: false };
-    if (data.nome || data.avatar_url) {
-       await sql`UPDATE vendedores SET nome = COALESCE(${data.nome}, nome), avatar_url = COALESCE(${data.avatar_url}, avatar_url) WHERE id = ${sellerId}`;
-    }
-    if (data.status) {
-      const isSystemActive = data.status === 'AVAILABLE' || data.status === 'IN_SERVICE' || data.status === 'BREAK' || data.status === 'LUNCH';
-      if (!isSystemActive) {
-        await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = NULL WHERE id = ${sellerId}`;
-      } else {
-        const currentRes = await sql`SELECT posicao_fila FROM vendedores WHERE id = ${sellerId}`;
-        const current = currentRes[0];
-        if (current && current.posicao_fila === null && data.status === 'AVAILABLE') {
-           const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
-           const nextPos = Number(maxPosRes[0].max || 0) + 1;
-           await sql`UPDATE vendedores SET status = ${data.status}, posicao_fila = ${nextPos} WHERE id = ${sellerId}`;
-        } else {
-           await sql`UPDATE vendedores SET status = ${data.status} WHERE id = ${sellerId}`;
-        }
-      }
-    }
     return { success: true };
   },
 
@@ -257,13 +323,6 @@ export const dbService = {
       console.error("Erro ao buscar histórico:", e);
       return [];
     }
-  },
-
-  async createSeller(name: string, avatar: string) {
-    const maxPosRes = await sql`SELECT COALESCE(MAX(posicao_fila), 0) as max FROM vendedores`;
-    const nextPos = Number(maxPosRes[0].max || 0) + 1;
-    await sql`INSERT INTO vendedores (nome, avatar_url, status, posicao_fila) VALUES (${name}, ${avatar}, 'AVAILABLE', ${nextPos})`;
-    return { success: true };
   },
 
   async getAdvancedStats(sellerId?: string) {

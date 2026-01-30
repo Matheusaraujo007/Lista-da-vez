@@ -11,7 +11,8 @@ import FiscalPanel from './components/FiscalPanel';
 
 const App: React.FC = () => {
   const [view, setView] = useState<'LOGIN' | 'ADMIN' | 'SELLER' | 'FISCAL' | 'START_SERVICE' | 'FINALIZE_SERVICE'>('LOGIN');
-  const [sellers, setSellers] = useState<(Seller & { activeClientName?: string, activeServiceId?: string, activeServiceStart?: string })[]>([]);
+  // Simplified state type since Seller interface now includes active service properties
+  const [sellers, setSellers] = useState<Seller[]>([]);
   const [reportData, setReportData] = useState<any[]>([]);
   const [activeService, setActiveService] = useState<Partial<ServiceRecord> | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -45,7 +46,8 @@ const App: React.FC = () => {
       
       if (currentSellerId && !isAdmin) {
         const current = dbSellers.find(s => s.id === currentSellerId);
-        if (current?.activeServiceId) {
+        // Improved type narrowing to ensure current is defined before accessing properties
+        if (current && current.activeServiceId) {
            setActiveService({ 
              id: current.activeServiceId, 
              sellerId: current.id, 
